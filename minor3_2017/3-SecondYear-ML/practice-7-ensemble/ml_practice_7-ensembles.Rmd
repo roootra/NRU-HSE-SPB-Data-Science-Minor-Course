@@ -1,0 +1,332 @@
+---
+title: "ML practice 7: Ансамбли"
+output: html_document
+---
+
+Сегодня мы продолжим знакомство с алгоритмами для регрессии и классификации. А точнее, поговорим о том, как объединять результаты нескольких моделей.
+ 
+Начнем с двух популярных алгоритмов, которые основаны на объединении нескольких моделей в одну
+
+И экспериментироать будем на уже рассматриваемой раньше задаче регрессии в датасете Boston. 
+
+
+Подготовим тренировочную и тестовую выборки:
+
+```{r}
+library(MASS)
+set.seed(1)
+train_ind = sample(1:nrow(Boston), nrow(Boston)*0.7)
+boston.test=Boston[-train_ind,]
+boston.train=Boston[train_ind,]
+```
+
+
+#Random forest
+
+Первый алгоритм -- это *Random Forest*, т.е. объединение деревьев
+
+![](https://i.imgur.com/BmEWJhA.png)
+
+
+```{r}
+library(randomForest)
+set.seed(1)
+bag.boston=randomForest(medv~.,data=boston.train, mtry=13, importance=TRUE)
+yhat.bag = predict(bag.boston,newdata=boston.test)
+```
+
+```{r}
+library(ggplot2)
+ggplot() + geom_point(aes(x=yhat.bag, y=boston.test$medv))+geom_abline(slope=1, intercept = 0, color="red") +
+  xlab("Predicted value") + ylab("Real value")
+```
+
+
+Ошибка:
+
+```{r}
+mean((yhat.bag-boston.test$medv)^2)
+```
+
+Попробум другие параметры (`?randomForest`): `ntree` -- number of trees to grow
+
+```{r}
+set.seed(1)
+bag.boston=randomForest(medv~., data=boston.train, mtry=13,ntree=25)
+yhat.bag = predict(bag.boston,newdata=boston.test)
+mean((yhat.bag-boston.test$medv)^2)
+```
+```{r}
+set.seed(1)
+bag.boston=randomForest(medv~., data=boston.train, mtry=13, ntree=2500)
+yhat.bag = predict(bag.boston,newdata=boston.test)
+mean((yhat.bag-boston.test$medv)^2)
+```
+
+Почему считается дольше?
+
+* `mtry` -- number of variables randomly sampled as candidates at each split
+* `importance` -- should importance of predictors be assessed
+
+```{r}
+set.seed(1)
+rf.boston=randomForest(medv~., data=boston.train, mtry=6, importance=TRUE)
+yhat.rf = predict(rf.boston,newdata=boston.test)
+mean((yhat.rf-boston.test$medv)^2)
+```
+
+Стало лучше, возможно мы немного побороли переобучение. А сравните, пожалуйста, ошибки на обучающей выборке для двух случаев.
+
+
+Отметим, что в *Random Forest* у нас еще есть и автоматическая оценка важности параметров (признаков) -- т.е. какой признак вносит больший вклад в модель. `IncMSE` = Increased MSE. Согласно справке -- mean decrease in accuracy (MSE в случае регрессии), т.е. насколько удаление этой переменной ухудшит модель, увеличив MSE (для каждого дерева в лесе)
+
+* Какая переменная важнее? С большим значением коэффициента или с меньшим?
+
+```{r}
+importance(rf.boston)
+varImpPlot(rf.boston)
+```
+
+Давайте попробуем удалить переменную из начала и из конца списка.
+
+Ошибка на обучающей выборке на полной модели
+
+```{r}
+yhat.rf0 = predict(rf.boston,newdata=boston.train)
+mean((yhat.rf0-boston.train$medv)^2)
+```
+
+
+Начало списка: `rm`
+
+```{r}
+set.seed(1)
+rf.boston2=randomForest(medv~.-rm, data=boston.train, mtry=6, importance=TRUE)
+yhat.rf2 = predict(rf.boston2,newdata=boston.train)
+mean((yhat.rf2-boston.train$medv)^2)
+yhat.rf2 = predict(rf.boston2,newdata=boston.test)
+mean((yhat.rf2-boston.test$medv)^2)
+```
+
+Конец списка: `chas`
+```{r}
+set.seed(1)
+rf.boston3=randomForest(medv~.-chas, data=boston.train, mtry=6, importance=TRUE)
+yhat.rf3 = predict(rf.boston3,newdata=boston.train)
+mean((yhat.rf3-boston.train$medv)^2)
+yhat.rf3 = predict(rf.boston3,newdata=boston.test)
+mean((yhat.rf3-boston.test$medv)^2)
+```
+
+* Какие выводы можно сделать?
+
+Как обычно, метод можно вызывать с помощью пакета `caret`, но он проводит оптимизацию параметров, что увеличивает время работы <https://topepo.github.io/caret/available-models.html>
+```{r}
+library(caret)
+set.seed(1)
+#rf = train(medv~., data=boston.train, method = "rf")
+rf = train(medv~., data=boston.train, method = "rf", tuneGrid = expand.grid(mtry = 6), importance = T) 
+rf
+```
+
+Так же можно получить оценку важности признаков
+
+```{r}
+importance(rf$finalModel)
+```
+
+И предсказать значения
+
+```{r}
+pred.rf = predict(rf, newdata = boston.test)
+mean((pred.rf-boston.test$medv)^2)
+```
+
+
+# Boosting
+
+Второй метод -- это градиентный бустинг. На каждом следующем шаге пытаемся предсказать ошибочно предсказанные значения (классификация) или наиболее отдаленные предсказания -- предсказываем остатки (регрессия)
+
+![](https://littleml.files.wordpress.com/2017/03/boosted-trees-process.png)
+![](https://qph.ec.quoracdn.net/main-qimg-c926968bfb2f1564c6351a72d60b5a87)
+
+
+
+С точки знения интерфейса он почти не отличается от *Random Forest*
+
+```{r}
+library(gbm)
+set.seed(1)
+boost.boston=gbm(medv~., data=boston.train, distribution="gaussian", n.trees=5000, interaction.depth=4)
+summary(boost.boston)
+```
+
+Посмотрим на прогноз. 
+
+```{r}
+yhat.boost=predict(boost.boston,newdata=boston.test, n.trees=5000)
+mean((yhat.boost-boston.test$medv)^2)
+```
+
+И сравним несколько моделей с разными параметрами (`?gbm` для объяснения параметров).
+
+* distribution="gaussian" -- для регрессии
+* distribution="bernoulli" -- для бинарной классификации
+
+```{r}
+boost.boston=gbm(medv~.,data=boston.train, distribution="gaussian", n.trees=5000, 
+                 interaction.depth=2, shrinkage=0.2, verbose=F)
+
+yhat.boost=predict(boost.boston,newdata=boston.test, n.trees=5000)
+mean((yhat.boost-boston.test$medv)^2)
+
+
+```
+
+Метод тоже можно вызывать с помощью пакета `caret` <https://topepo.github.io/caret/available-models.html>
+```{r}
+set.seed(1)
+#boost = train(medv~., data=boston.train, method = "gbm") 
+boost = train(medv~., data=boston.train, method = "gbm", verbose = F) 
+boost
+summary(boost$finalModel)
+```
+
+Предсказание
+```{r}
+pred.gbm = predict(boost, newdata = boston.test)
+mean((pred.gbm-boston.test$medv)^2)
+```
+
+# Ансамбли: общее описание
+
+Ансамбли моделей не ограничиваются готовыми алгоритмами, модели можно соединять разными способами. Выделяют несколько подходов
+
+1. Voting/averaging -- голосование (классификация) / усреднение (регрессия) результатов нескольких моделей
+2. Bagging (Bootstrap AGregation) -- выделение случайных подвыборок с повторением, построение моделей (обычно одного типа) на каждой из них, объединение результатов. Random Forest -- один из примеров
+3. Boosting -- на каждом новом шаге построение новой модели (обычно одного типа) для улучшения предсказания той части, которая неправильно предсказалась на предыдущем шаге. Один из примеров -- градиентный бустинг
+4. Stacking -- построение нескольких моделей (обычно разного типа), затем построение обобщающей модели, в которую в качестве признаков (предикторов) передаются результаты первоначальных моделей
+
+## Averaging
+
+Построим три модели: дерево, линейную регрессию и регрессию с регуляризацией
+
+```{r}
+trC = trainControl(method = "cv", number = 10)
+model.1.tree = train(medv~., data=boston.train, method = "ctree", trControl = trC)
+pred.1.tree = predict(model.1.tree, newdata = boston.test)
+mean((pred.1.tree - boston.test$medv)^2)
+```
+
+```{r}
+model.2.lm = train(medv~., data=boston.train, method = "lm", trControl = trC)
+pred.2.lm = predict(model.2.lm, newdata = boston.test)
+mean((pred.2.lm - boston.test$medv)^2)
+```
+
+```{r}
+model.3.reg = train(medv~., data=boston.train, method = "glmnet", trControl = trC)
+pred.3.reg = predict(model.3.reg, newdata = boston.test)
+mean((pred.3.reg - boston.test$medv)^2)
+```
+
+Результаты на обучающей выборке
+```{r}
+results = resamples(list(tree = model.1.tree, lm = model.2.lm, reg = model.3.reg))
+summary(results)
+```
+
+Итоговое предсказание на тестовой выборке
+
+```{r}
+pred.final = (pred.1.tree + pred.2.lm + pred.3.reg)/3
+mean((pred.final - boston.test$medv)^2)
+
+cor(pred.1.tree, pred.2.lm)
+cor(pred.3.reg, pred.2.lm)
+plot(pred.3.reg, pred.2.lm)
+```
+
+## Bagging
+
+На каждом шаге случайно выбираем значения и строим модель
+
+```{r}
+sample(1:5, replace = F)
+sample(1:5,  size = 15, replace = T)
+d = matrix(NA, nrow = 10, ncol = dim(boston.test)[1]) #сюда будем сохранять предсказания
+num = dim(boston.train)[1]
+for (i in 1:10){
+  s = sample(1:num, replace = T)
+  data0 = boston.train[s,]
+  model = train(medv~., data=data0, method = "glmnet", trControl = trC)
+  d[i,] = predict(model, newdata = boston.test)
+}
+```
+
+Предсказание
+```{r}
+pred.bag = colMeans(d)
+mean((pred.bag - boston.test$medv)^2)
+```
+
+В `caret` есть реализованные ансамбли, построенные по такому принципу -- см. `treebag`, `bagEarth`
+
+## Boosting
+
+Тоже можно реализовать вручную, но есть много уже готовых метдов, например, adaboost для классификации
+
+## Stacking
+
+Рассмотрим те же модели, что были построены для пункта Averaging. И в качестве обобщающей модели возьмем дерево
+
+Создаем новый датасет
+
+```{r}
+dataStack = data.frame(tree = predict(model.1.tree, newdata = boston.train), 
+                       lm = predict(model.2.lm, newdata = boston.train), 
+                       reg = predict(model.3.reg, newdata = boston.train),
+                       medv = boston.train$medv)
+```
+
+Строим модель
+```{r}
+model.tree = train(medv~., data=dataStack, method = "ctree")
+```
+
+Т.к. модель использует предсказания предыдущих моделей, то для тестовой выборки их тоже нужно посчитать (мы это уже делали раньше)
+```{r}
+dataStack.test = data.frame(tree = pred.1.tree, lm = pred.2.lm, reg = pred.3.reg)
+```
+
+Теперь окончательное предсказание
+```{r}
+pred.tree = predict(model.tree, newdata = dataStack.test)
+mean((pred.tree - boston.test$medv)^2)
+```
+
+
+# Ваша очередь
+
+Постройте разные ансамбли для решения задачи классификации для датасета о раке груди `?mlbench::BreastCancer`
+```{r}
+library(mlbench)
+data(BreastCancer)
+library(dplyr)
+BreastCancer = select(BreastCancer, -Id)
+```
+
+p.s. Как организовать голосование. Допустим, есть три вектора длины 10, принимающие значения yes/no
+```{r}
+a1 = sample(c("yes", "no"), size =10, replace = T)
+a2 = sample(c("yes", "no"), size =10, replace = T)
+a3 = sample(c("yes", "no"), size =10, replace = T)
+a = rbind(a1,a2,a3)
+a
+```
+
+И итоговое предсказание
+```{r}
+apply(a, 2, FUN = function (x) names(sort(table(x), decreasing=TRUE)[1]))
+```
+

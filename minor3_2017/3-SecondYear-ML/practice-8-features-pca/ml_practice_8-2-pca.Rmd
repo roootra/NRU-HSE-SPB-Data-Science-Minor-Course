@@ -1,0 +1,208 @@
+---
+title: "ML practice 8. Part 2: Dimensionality Reduction"
+output: html_document
+---
+
+Продолжаем говорить о том, какие еще существуют методы для того, чтобы сократить количество переменных, включаемых в модель. Мы обсудили методы, позволяющие отобрать только часть переменных, сегодня разбираем другой подход, осонованный на построении комбинаций из переменных
+
+###  Данные (колледжи)
+
+Загружаем данные
+```{r, warning=FALSE, message=FALSE}
+library(ISLR)
+data <- College
+```
+
+Посмотрим на них
+
+```{r, warning=FALSE, message=FALSE}
+str(data)
+```
+
+У нас есть 18 параметров, характеризующих колледжи:
+
+* `Private` A factor with levels No and Yes indicating private or public university
+* `Apps` Number of applications received
+* `Accept` Number of applications accepted
+* `Enroll` Number of new students enrolled
+* `Top10perc` Pct. new students from top 10% of H.S. class
+* `Top25perc` Pct. new students from top 25% of H.S. class
+* `F.Undergrad` Number of fulltime undergraduates
+* `P.Undergrad` Number of parttime undergraduates
+* `Outstate` Out-of-state tuition
+* `Room.Board` Room and board costs
+* `Books` Estimated book costs
+* `Personal` Estimated personal spending
+* `PhD` Pct. of faculty with Ph.D.'s
+* `Terminal` Pct. of faculty with terminal degree
+* `S.F.Ratio` Student/faculty ratio
+* `perc.alumni` Pct. alumni who donate
+* `Expend` Instructional expenditure per student
+* `Grad.Rate` Graduation rate
+
+### Анализ главных компонент (Principal Component Analysis)
+
+Общая идея методов уменьшения размерности -- использовать взаимосвязи, которые есть в данных. Зная взаимосвязи, мы можем выразить несколько признаков через один и работать уже с более простой моделью. Конечно, избежать потерь информации, скорее всего не удастся, но можно постараться ее минимизировать.
+
+Метод главных компонент (англ. principal component analysis, PCA) — способ уменьшить размерность данных, потеряв наименьшее количество информации. Подробнее про метод можно почитать в книге Exploratory Data Analysis (она есть в shared/minor3_2017/books) 
+
+В PCA данные преобразуются таким образом, чтобы новые переменные (компоненты, построенные в виде комбинации из первоначальных переменных) наилучшим образом описывали изменчивость в данных (другими словами -- мы выбираем наиболее "загруженное" направление)
+
+![](https://upload.wikimedia.org/wikipedia/ru/4/4a/FirstPrincipalComponent.jpg)
+
+```{r}
+data.pca <- prcomp(dplyr::select(data,-Private),
+                 center = TRUE,
+                 scale. = TRUE) 
+data.pca
+```
+* Зачем нужна нормализация?
+
+Изменчивость данных, объясняемая компонентами
+```{r}
+plot(data.pca)
+```
+
+Суммарную долю объясненной изменчивости можно посмотреть с помощью функции `summary()`
+
+```{r}
+summary(data.pca)
+```
+
+Вернемся к машинному обучению
+
+### Обучающая и тестовая выборки
+
+```{r message = F, warning=FALSE}
+set.seed(345)
+data.test.ind = sample(seq_len(nrow(data)), size = nrow(data)*0.2)
+data.test = data[data.test.ind,]
+data.main = data[-data.test.ind,]
+```
+
+### PCA в пакете `caret`
+
+С помощью пакета `caret` выполняем PCA, не забывая про нормализацию переменных. Подробнее про предобработку переменных в пакете `caret` можно посмотреть в [документации](https://topepo.github.io/caret/pre-processing.html)
+
+```{r  message = F, warning=FALSE}
+library(caret)
+preprocessParams <- preProcess(data.main, method=c("center", "scale", "pca"))
+# summarize transform parameters
+preprocessParams
+```
+
+По умолчанию функция оставляет столько компонент, сколько покрывают 95% изменчивости данных, но этот параметр можно менять. То, как исходные переменные вносят вклад в каждую из компонент, можно посмотреть в переменной `rotation`
+```{r}
+preprocessParams$rotation
+```
+
+Затем мы используем полученные зависимости, чтобы преобразовать обучающую и тестовую выборки
+```{r}
+# transform the dataset using the parameters
+transformed.main <- predict(preprocessParams, data.main)
+transformed.test <- predict(preprocessParams, data.test)
+```
+
+Одно из частых применений PCA -- построение графиков (т.к. нам сложно рисовать при размерности больше 2)
+
+```{r  warning=FALSE, message=FALSE}
+library(ggplot2)
+ggplot() + geom_point(data = transformed.main, aes(x = PC1, y = PC2, color = Private))
+```
+
+### Построение модели
+
+Построим модель для предсказания типа колледжа (частный - государственный) по исходным данным, без преобразования
+```{r message = F, warning=FALSE}
+library(e1071)
+svm_model0 <- svm(Private~., data = data.main)
+```
+
+Результаты на обучающей 
+
+```{r}
+
+svm.Pred<-predict(svm_model0, data.main, probability=FALSE)
+confusionMatrix(svm.Pred,data.main$Private)
+```
+
+и тестовой выборках
+
+```{r}
+svm.Pred<-predict(svm_model0, data.test, probability=FALSE)
+confusionMatrix(svm.Pred,data.test$Private)
+```
+
+А теперь посмотрим на результаты для данных со сниженной размерностью
+```{r}
+svm_model <- svm(Private~., data = transformed.main)
+```
+
+Результаты на обучающей 
+
+```{r}
+svm.Pred<-predict(svm_model, transformed.main, probability=FALSE)
+confusionMatrix(svm.Pred,transformed.main$Private)
+```
+
+и тестовой выборках
+
+```{r}
+svm.Pred<-predict(svm_model, transformed.test, probability=FALSE)
+confusionMatrix(svm.Pred,transformed.test$Private)
+```
+
+Уменьшим количество компонент
+```{r}
+preprocessParams2 <- preProcess(data.main,
+                                method=c("center", "scale", "pca"), thresh = 0.8)
+preprocessParams2
+
+# transform the dataset using the parameters
+transformed.main2 <- predict(preprocessParams2, data.main)
+transformed.test2 <- predict(preprocessParams2, data.test)
+```
+
+А теперь посмотрим на результаты для модели с меньшим количеством переменных
+```{r message = F, warning=FALSE}
+svm_model2 <- svm(Private~., data = transformed.main2)
+```
+
+Результаты на обучающей 
+
+```{r}
+
+svm.Pred<-predict(svm_model2, transformed.main2, probability=FALSE)
+confusionMatrix(svm.Pred,transformed.main2$Private)
+```
+
+и тестовой выборках
+
+```{r}
+svm.Pred<-predict(svm_model2, transformed.test2, probability=FALSE)
+confusionMatrix(svm.Pred,transformed.test2$Private)
+
+```
+
+* Что вы можете сказать про результаты?
+
+**Ваша очередь:**
+
+* на этих же данных постройте модель, предсказывающую количество поданных заявлений (Apps)
+* на этих же данных постройте модель, предсказывающую graduation rate
+
+При предсказании числовой переменной не забудьте убрать ее из PCA
+
+```{r}
+preprocessParams3 <- preProcess(dplyr::select(data.main, -Apps),
+                                method=c("center", "scale", "pca"), thresh = 0.8)
+
+# transform the dataset using the parameters
+transformed.main3 <- predict(preprocessParams3, data.main)
+transformed.test3 <- predict(preprocessParams3, data.test)
+```
+
+
+
+
+

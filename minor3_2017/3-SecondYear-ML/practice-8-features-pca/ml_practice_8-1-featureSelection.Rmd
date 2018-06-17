@@ -1,0 +1,332 @@
+---
+title: "ML practice 8. Part 1: Feature Selection"
+output: html_document
+---
+
+Сегодня мы поговорим о том, какие методы существуют для выбора предикторов для включения в модель.
+
+### Данные
+
+В качестве примера используем данные про цены на жилье в Бостоне
+
+```{r warning=FALSE, message=FALSE}
+library(MASS)
+#?Boston
+
+library(ggplot2)
+library(dplyr)
+```
+
+* `crim` per capita crime rate by town
+* `zn` proportion of residential land zoned for lots over 25,000 sq.ft
+* `indus` proportion of non-retail business acres per town
+* `chas` Charles River dummy variable (= 1 if tract bounds river; 0 otherwise).
+* `nox` nitrogen oxides concentration (parts per 10 million).
+* `rm` average number of rooms per dwelling.
+* `age` proportion of owner-occupied units built prior to 1940.
+* `dis` weighted mean of distances to five Boston employment centres.
+* `rad` index of accessibility to radial highways.
+* `tax` full-value property-tax rate per \$10,000.
+* `ptratio` pupil-teacher ratio by town.
+* `black` 1000(Bk - 0.63)^2 where Bk is the proportion of blacks by town.
+* `lstat` lower status of the population (percent).
+* `medv` median value of owner-occupied homes in \$1000s.
+
+```{r results='asis'}
+data(Boston)
+pander::pandoc.table(head(Boston), split.tables=Inf)
+```
+
+### Обучающая и тестовая выборки
+
+Отделим 20\% от датасета. Как обычно, эта часть не будет использоваться для обучения модели, но на ней мы будем проверять (тестировать), насколько  хороша наша модель. 
+
+```{r message = F, warning=FALSE}
+set.seed(54321) 
+Boston.test.ind = sample(seq_len(nrow(Boston)), size = nrow(Boston)*0.2)
+Boston.test = Boston[Boston.test.ind,]
+Boston.train = Boston[-Boston.test.ind,]
+
+```
+
+## Отбор признаков (Feature Selection)
+
+* Зачем нужно выбирать, какие переменные включить в модель? Почему бы не использовать все?
+
+Некоторые алгоитмы машинного обучения уже построены так, что отбирают только часть признаков. Например, деревья решений
+
+```{r}
+library(partykit)
+modelTree <- ctree(medv~., data = Boston.train)
+plot(modelTree, digits = 3)
+```
+
+* Какие переменные не используются в модели?
+* Какую долю от общего числа переменных составляют переменные, включенные в итоговую модель?
+
+Другие алгоритмы строят модель по всем доступным переменным. Например:
+
+```{r}
+lm.fit<-lm(medv~., data = Boston.train)
+summary(lm.fit)
+```
+
+* К какому типу вы отнесете рассмотренные нами ранее алгоритмы (и регрессии, и классификации)?
+
+    + LASSO regression
+    + Ridge regression
+    + SVM
+    + kNN
+    + Random Forest
+    + Gradient Boosting
+    + Logistic regression
+
+### Методы отбора признаков
+
+В целом методы отбора признаков можно разделить на две группы
+
+* добавление / удаление признаков и выбор модели с лучшей оценкой качества (т.е. построение нескольких моделей и сравнение их между собой)
+
+    + Recursive Feature Elimination
+    + Genetic Algorithms
+    + Simulated Annealing
+    
+* оценивание важности каждой из переменных по-отдельности (например, влияния ее на предсказываемую переменную), вне рамок модели
+
+Мы продолжаем использовать пакет `caret` ([подробнее](https://topepo.github.io/caret/feature-selection-overview.html))
+
+```{r, warning=FALSE, message=FALSE}
+library(caret)
+```
+
+Посмотрим, есть ли в данных **сильно взаимосвязанные** переменные
+
+```{r results='asis'}
+correlationMatrix <- cor(Boston)
+pander::pandoc.table(correlationMatrix, split.tables=Inf)
+```
+
+```{r}
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.75)
+# print indexes of highly correlated attributes
+highlyCorrelated
+names(Boston)[highlyCorrelated]
+```
+
+Оценим **значимость** признаков согласно модели (например, для линейной регрессии по всем переменным)
+
+```{r}
+model <- train(medv~., data=Boston.train, method="lm")
+importance <- varImp(model, scale=FALSE)
+print(importance)
+plot(importance)
+```
+
+Для разных моделей значимость признаков оценивается по-разному. Для линейной регрессии значимость признака -- это модуль значения t-критерия. Подробнее для других моделей можно посмотреть в справке функции `varImp()`
+
+* Какая переменная наиболее значима?
+
+### Recursive Feature Elimination (RFE)
+
+Алгоритм RFE работает следующим образом:
+
+1. Построение модели по всем переменным (признакам)
+2. Вычисление оценки качества модели
+3. Упорядочение переменных согласно их значимости для модели
+4. Удаление наименее значимой переменной
+5. Построение модели по новому (сокращенному) набору переменных. Повторение шагов 2-4
+6. Выбор лучшей модели (и лучшего набора признаков соответственно)
+
+Как обычно, чтобы избежать переобучения и "подгонки" модели под обучающую выборку, используем кросс-валидацию.
+
+Зададим параметры кросс-валидации
+```{r}
+control <- rfeControl(functions=lmFuncs, method="cv", number=10)
+```
+
+Запустим алгоритм RFE
+```{r message = F, warning=FALSE}
+set.seed(10)
+results <- rfe(x = dplyr::select(Boston.train, -medv),
+               y= Boston.train$medv, 
+               sizes=c(1:13), 
+               rfeControl=control)
+```
+
+Результат:
+```{r}
+results
+```
+
+Сравнение моделей:
+```{r}
+plot(results, type=c("g", "o"))
+```
+
+Итоговые предикторы:
+```{r}
+predictors(results)
+```
+
+Итоговая модель:
+```{r}
+summary(results$fit)
+```
+
+Ошибка
+```{r}
+lmSelected.test.RSS <- sum((predict(results$fit, Boston.test)-Boston.test$medv)^2)
+lmSelected.test.RSS
+```
+
+Сравним с другими методами:
+```{r message=F, warning=F}
+library(glmnet)
+
+# transform model and data to matrix for glmnet package
+X.train <- model.matrix(medv~.-1, data=Boston.train)
+X.test <- model.matrix(medv~.-1, data=Boston.test)
+
+# train models
+ridge<-cv.glmnet(X.train, Boston.train$medv, alpha = 0)
+lss<-cv.glmnet(X.train, Boston.train$medv, alpha = 1)
+elastic<-cv.glmnet(X.train, Boston.train$medv, alpha = 0.5)
+
+# calculate errors (test set)
+ridge.test.RSS<-sum((predict(ridge,X.test)-Boston.test$medv)^2)
+elastic.test.RSS<-sum((predict(elastic,X.test)-Boston.test$medv)^2)
+lasso.test.RSS<-sum((predict(lss,X.test)-Boston.test$medv)^2)
+lm.test.RSS <- sum((predict(lm.fit, Boston.test)-Boston.test$medv)^2)
+tree.test.RSS <- sum((predict(modelTree, Boston.test)-Boston.test$medv)^2)
+```
+
+По ошибкам мы получили:
+
+|Метод      |RSS (test set)          |
+|-----------|------------------------|
+|LM         |`r lm.test.RSS`         |
+|LM with FS |`r lmSelected.test.RSS` |
+|LASSO      |`r lasso.test.RSS`      |
+|Ridge      |`r ridge.test.RSS`      |
+|Elastic 0.5|`r elastic.test.RSS`    |
+|Tree       |`r tree.test.RSS`       |
+
+* Какую модель выбрать?
+
+### P.S. Классификация
+Выбор признаков применяется не только в задачах регрессии, но и для классификации.
+
+Данные про виды стекла. Оставим только два класса для наглядности:
+
+```{r, warning=FALSE, message=FALSE}
+library(mlbench)
+data(Glass)
+glass <- Glass %>% filter(Type %in% c(2,1))
+glass$Type <- factor(glass$Type)
+```
+
+Обучающая и тестовая выборки
+```{r}
+set.seed(54321)
+glass.test.ind = sample(seq_len(nrow(glass)), size = nrow(glass)*0.4)
+glass.test = glass[glass.test.ind,]
+glass.main = glass[-glass.test.ind,]
+```
+
+Построим модель Random Forrest
+
+```{r warning=FALSE, message=FALSE}
+library(randomForest)
+rf_model <- randomForest(Type ~ ., data=glass.main)
+```
+
+Результаты на обучающей 
+
+```{r}
+rf.Pred<-predict(rf_model, glass.main, probability=FALSE)
+confusionMatrix(rf.Pred,glass.main$Type)
+```
+
+и тестовой выборках
+
+```{r}
+rf.Pred<-predict(rf_model, glass.test, probability=FALSE)
+confusionMatrix(rf.Pred,glass.test$Type)
+```
+
+Отберем признаки
+```{r message = F, warning=FALSE}
+control <- rfeControl(functions=rfFuncs, method="cv", number=10)
+# run the RFE algorithm
+rf.results <- rfe(dplyr::select(glass.main, -Type),
+               glass.main$Type, 
+               sizes=c(1:9), 
+               rfeControl=control)
+# summarize the results
+print(rf.results)
+# list the chosen features
+predictors(rf.results)
+# plot the results
+plot(rf.results, type=c("g", "o"))
+```
+
+Результаты на обучающей 
+
+```{r}
+rf.PredFS.train<-predict(rf.results$fit, glass.main, probability=FALSE)
+confusionMatrix(rf.PredFS.train,glass.main$Type)
+```
+
+и тестовой выборках
+
+```{r}
+rf.PredFS.test<-predict(rf.results$fit, glass.test, probability=FALSE)
+confusionMatrix(rf.PredFS.test,glass.test$Type)
+```
+
+
+
+**Ваша очередь:** 
+
+* Постройте регрессионые модели для данных о продаже (`Sales`) детских кресел
+
+```{r message = F, warning=FALSE}
+library(ISLR)
+data(Carseats)
+```
+
+```{r eval = F}
+?Carseats
+```
+
+```{r message = F, warning=FALSE, results='asis'}
+pander::pandoc.table(head(Carseats), split.tables=Inf)
+```
+
+Для того, чтобы можно было посчитать корреляцию и чтобы функция `rfe()` работала, не выдавая ошибки "undefined column selected", нужно преобразовать факторы в числа.
+
+Для `Urban` и `US` (yes-no questions):
+```{r}
+Carseats$Urban <- as.numeric(Carseats$Urban) - 1
+Carseats$US <- as.numeric(Carseats$US) - 1
+```
+
+Для `ShelveLoc` (фактор с тремя вариантами):
+
+1 способ (не всегда подходящий)
+```{r}
+Carseats$ShelveLocNew <- as.numeric(Carseats$ShelveLoc)
+```
+
+2 способ (dummy variables)
+```{r}
+temp <- model.matrix(~ ShelveLoc - 1, data=Carseats)
+head(temp)
+
+Carseats <- dplyr::select(Carseats, -ShelveLoc)
+Carseats <- cbind(Carseats, temp)
+```
+
+* Какая модель дает лучшее предсказание на тестовой выборке? Какие предикторы в нее входят? 
+
+

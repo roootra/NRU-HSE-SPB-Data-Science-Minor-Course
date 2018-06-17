@@ -1,0 +1,267 @@
+---
+title: "ML practice 5: regularization"
+output: 
+  html_document:
+    mathjax: https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML
+---
+
+### Данные
+
+Вспомним данные про цены на жилье в Бостоне
+
+```{r}
+library(MASS)
+#?Boston
+```
+
+* `crim` per capita crime rate by town
+* `zn` proportion of residential land zoned for lots over 25,000 sq.ft
+* `indus` proportion of non-retail business acres per town
+* `chas` Charles River dummy variable (= 1 if tract bounds river; 0 otherwise).
+* `nox` nitrogen oxides concentration (parts per 10 million).
+* `rm` average number of rooms per dwelling.
+* `age` proportion of owner-occupied units built prior to 1940.
+* `dis` weighted mean of distances to five Boston employment centres.
+* `rad` index of accessibility to radial highways.
+* `tax` full-value property-tax rate per \$10,000.
+* `ptratio` pupil-teacher ratio by town.
+* `black` 1000(Bk - 0.63)^2 where Bk is the proportion of blacks by town.
+* `lstat` lower status of the population (percent).
+* `medv` median value of owner-occupied homes in \$1000s.
+
+```{r results='asis'}
+data(Boston)
+pander::pandoc.table(head(Boston), split.tables=Inf)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(caret)
+```
+
+
+# Обучающая и тестовая выборки
+
+Отделим 20\% от датасета. Как обычно, эта часть не будет использоваться для обучения модели, но на ней мы будем проверять (тестировать), насколько  хороша наша модель. 
+
+```{r message = F, warning=FALSE}
+set.seed(6) 
+Boston.test.ind = sample(seq_len(nrow(Boston)), size = nrow(Boston)*0.2)
+Boston.test = Boston[Boston.test.ind,]
+Boston.train = Boston[-Boston.test.ind,]
+
+```
+
+
+### Линейная регрессия (повторение)
+
+Построение модели
+```{r}
+lm.fit<-lm(medv~., data = Boston.train)
+summary(lm.fit)
+```
+
+Соответствие предсказанных и реальных значений:
+```{r}
+lm.predictions <- predict(lm.fit, Boston.test)
+summary(lm.fit)
+
+ggplot()+geom_point((aes(x=Boston.test$medv, y=lm.predictions))) + 
+  geom_abline(color="red") +
+  xlab("Real value") +
+  ylab("Predicted value")
+```
+
+Ошибка предсказания
+```{r}
+lm.test.RSS = sum((lm.predictions-Boston.test$medv)^2)
+lm.test.RSS
+```
+
+Итак, наша ошибка для обычной регрессии равна `r lm.test.RSS`. Сможем ли мы сделать модель лучше? Может, нам нужны не все переменные?
+
+### Регуляризация
+
+Регуляризация -- это способ строить модели так, чтобы коэффициенты были как можно меньше. В предельных случаях это приводит к тому, что некоторые коэффициенты становятся равными 0, т.е. исключаются из модели.
+
+Чем же нам поможет регуляризация?
+
+Одна из основных целей регуляризации, это выбор "оптимального" соотношения сложности модели и ее качества.
+
+* А чем нам помогут не предельные случаи, т.е. просто уменьшение коэффициентов? Варианты?
+
+Библиотека **glmnet** помогает нам выбрать такое оптимальное соотношение. 
+
+Если быть формально точным, то решает задачу $$ \min_{\beta_0,\beta} \frac{1}{N} \sum_{i=1}^{N} w_i l(y_i,\beta_0+\beta^T x_i) + \lambda\left[(1-\alpha)||\beta||_2^2 + \alpha ||\beta||_1\right].$$
+
+В переводе на человеческий, формула выше содержит две части: левая -- в нашем случае будет представлять сумму квадратов ошибок и правую -- собственно регуляризация.  
+
+$||\beta||_1$ -- это сумма модулей коэффициентов, и регрессия с такой регуляризацией называется **лассо (LASSO) регрессия** ($L_1$-регуляризация).
+
+$||\beta||_2^2$ -- это сумма квадратов коэффициентов, и регрессия с такой регуляризацией называется **гребневая (ridge) регрессия** ($L_2$-регуляризация).
+
+Модель же смешивающая в какой-либо пропорции это два штрафа называется **эластичная сеть**
+
+Давайте посмотрим, какой смысл в этих моделях, сравнив их с простой линейной регрессией.
+
+### ЛАССО регрессия
+
+Мы будем использовать пакет **glmnet**, однако он работает не с привычными нам формулами, а с матрицами. По этому нам надо еще немного подготовить наши данные. **model.matrix** используется и в обычной линейной регрессии, просто скрыто от нас. Она заодно превращает факторы в наборы индикаторных переменных.
+
+```{r}
+X.train <- model.matrix(medv~.-1, data=Boston.train)
+X.test <- model.matrix(medv~.-1, data=Boston.test)
+```
+
+Попробуем прямо применить модель к нашим данным:
+
+```{r message=F, warning=F}
+library(glmnet)
+glmnet.fit<-glmnet(X.train, Boston.train$medv)
+
+glmnet.predictions <- predict(glmnet.fit, X.test)
+```
+
+Если мы посмотрим на свойства **glmnet.predictions**, то увидим, что вместо одного вектора мы получили ... (а сколько же мы их получили?)
+
+```{r}
+str(glmnet.predictions)
+```
+
+Помните, в формуле фигурировала величина $\lambda$, на которую домножается штраф. Так вот, по умолчанию **glmnet** строит не одну модель, а сразу много, для разных $\lambda$
+
+Посмотрим на них:
+```{r}
+glmnet.fit$lambda
+```
+
+А в чем же смысл? Как мы помним, разные значения $\lambda$ будут по-разному выстраивать соотношение между штрафом и ошибкой. При $\lambda$ близкой к 0 мы получим обычную линейную регрессию. А что произойдет при большом значении $\lambda$? Какие ваши идеи?
+
+Давайте посмотрим на прогноз при большом значении $\lambda$
+
+```{r}
+ggplot()+geom_point((aes(x=Boston.test$medv, y=glmnet.predictions[,1]))) + 
+  geom_abline(color="red") +
+  xlab("Real value") +
+  ylab("Predicted value")
+```
+
+Что произошло? Как это объяснить? 
+
+```{r}
+ggplot()+geom_point(aes(x=Boston.test$medv, y=glmnet.predictions[,1])) + 
+  geom_point(aes(x=Boston.test$medv, y=glmnet.predictions[,2]), color = "blue") +
+  geom_point(aes(x=Boston.test$medv, y=glmnet.predictions[,3]), color = "green") +
+  geom_abline(color="red") +
+  xlab("Real value") +
+  ylab("Predicted value")
+```
+
+Попробуйте нарисовать графики для разных $\lambda$ и сделать выводы. Что меняется при изменении $\lambda$?
+
+Посчитаем теперь ошибку для каждой из моделей:
+
+```{r}
+glmnet.test.RSS <- colSums((glmnet.predictions-Boston.test$medv)^2)
+ggplot()+
+  geom_point(aes(x=1:length(glmnet.test.RSS), y=glmnet.test.RSS)) +
+  geom_hline(aes(yintercept=lm.test.RSS), color="red") +
+  xlab("Experiment number") +
+  ylab("Error (RSS)")
+```
+
+Мы видим что при некоторых значениях $\lambda$, результаты на тестовой выборке лучше. Но прежде чем мы поучимся подбирать $\lambda$, давайте посмотрим, как связаны коэффициенты в регрессии и  $\lambda$.
+
+```{r}
+plot(glmnet.fit,xvar="lambda")
+```
+
+Этот график показывают нам, какие из переменных важны, а какие не очень. Но можно посмотреть и по другому, **print()** выведет нам количество ненулевых коэффициентов и объясненную долю дисперсии для каждого значения $\lambda$.
+
+```{r}
+print(glmnet.fit)
+```
+
+Или то же самое на графике:
+
+```{r}
+str(glmnet.fit)
+ggplot()+
+  geom_point(aes(x=log(glmnet.fit$lambda), y=glmnet.fit$dev.ratio, color = glmnet.fit$df)) +
+  xlab("Log Lambda") +
+  ylab("Explained variance")
+```
+
+Теперь посмотрим на способ получить "оптимальное" значение $\lambda$.
+Если бы мы смотрели на тестовое множество, то можно было бы выбрать $\lambda$ по нему. Но мы считаем, что оно нам недоступно и представляет собой "данные из реального мира".
+
+Если у нас нет тестового множества, надо его придумать! А чтобы не сломать все неудачным выбором тестового множества, мы вспомним кросс-валидацию. *glmnet* сам умеет выбирать $\lambda$ на основе кросвалидации.
+
+```{r}
+cv.glmnet.fit<-cv.glmnet(X.train, Boston.train$medv)
+cv.glmnet.fit
+best.lambda <- cv.glmnet.fit$lambda.min
+best.lambda
+```
+
+Мы получили какое-то $\lambda$. Давайте его подставим и посмотрим, чем это закончится.
+
+```{r}
+glmnet.fit.best<-glmnet(X.train, Boston.train$medv, lambda = best.lambda)
+coef(glmnet.fit.best)
+glmnet.predictions.best <- predict(glmnet.fit.best, X.test)
+glmnet.best.test.RSS <- sum((glmnet.predictions.best-Boston.test$medv)^2)
+```
+
+Мы можем сравнить две оценки. Просто регрессия дала нам `r lm.test.RSS` а LASSO `r glmnet.best.test.RSS`.
+
+### Ridge регрессия
+Мы посмотрели на LASSO, а чем же отличается ridge модель.
+
+В этом примере, мы сразу построим оптимальные по кросвалидации значения, для ridge и для elastic net, вам же предлагается повторить, все что было выше и понять как эти модели работают.
+
+```{r}
+ridge<-cv.glmnet(X.train, Boston.train$medv, alpha = 0)
+elastic<-cv.glmnet(X.train, Boston.train$medv, alpha = 0.5)
+
+ridge.test.RSS<-sum((predict(ridge,X.test)-Boston.test$medv)^2)
+elastic.test.RSS<-sum((predict(elastic,X.test)-Boston.test$medv)^2)
+```
+
+По ошибкам мы получили:
+
+|Метод      |RSS                     |
+|-----------|------------------------|
+|LM         |`r lm.test.RSS`         |
+|LASSO      |`r glmnet.best.test.RSS`|
+|Ridge      |`r ridge.test.RSS`      |
+|Elastic 0.5|`r elastic.test.RSS`    |
+
+Какую модель выбрать?
+
+
+**Ваша очередь:** 
+
+* Постройте регрессионые модели для данных о продаже (`Sales`) детских кресел, но для случая логистической регрессии `glmnet.fit<-glmnet(X.train, ..., family = "binomial")`
+
+```{r message = F, warning=FALSE}
+library(ISLR)
+data(Carseats)
+```
+
+```{r eval = F}
+?Carseats
+carseats <- ISLR::Carseats
+сarseats <- carseats %>% 
+  mutate(High = ifelse(Sales <= 8, "No", "Yes")) %>% 
+  dplyr::select(-Sales) 
+```
+
+```{r message = F, warning=FALSE, results='asis'}
+pander::pandoc.table(head(Carseats), split.tables=Inf)
+```
+
+* Какая модель дает лучшее предсказание на тестовой выборке? Какие предикторы в нее входят? 
+
+

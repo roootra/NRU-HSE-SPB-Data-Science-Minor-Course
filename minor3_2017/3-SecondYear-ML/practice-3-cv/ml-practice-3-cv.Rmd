@@ -1,0 +1,287 @@
+---
+title: "ML practice 3: Cross-validation, bias-variance tradeoff"
+output: 
+  html_document:
+    mathjax: https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML
+---
+
+Сегодня говорим о нескольких важных понятиях в машинном обучении, но сначала -- повторение
+
+**Ваша очередь:**
+
+* Зачем нужно разделение на тестовую и обучающую выборки?
+* Как вы думаете, зачем иногда делят на три части train-validation-test?
+
+### Напоминание
+
+**Переобучение** -- слишком сложная модель (включение лишних переменных, слишком сложная зависимость) => подогнали модель к конкретным данным, может не работать на других данных
+
+**Недообучение** -- слишком простая модель (невключение важных переменных, слишком простая зависимость) => модель не отражает особенности данных
+
+![](https://pp.userapi.com/c837433/v837433173/55a72/ue8z_xTFFto.jpg)
+![](https://pp.userapi.com/c837433/v837433173/55a69/c4EEF59vb7E.jpg)
+
+![](https://pp.userapi.com/c837433/v837433173/55a60/Djr62Gsf_Dg.jpg)
+
+## Bias-Variance Tradeoff
+
+В целом, ошибку предсказания модели можно разложить на три составляющие
+
+Error = Irreducible Error + Bias + Variance
+
+* Irreducible Error = ошибка, обусловленная данными (в них есть разброс, отклонения, выбросы)
+* Bias = отклонение модели от данных
+* Variance = вариативность значений предсказываемой переменной (разнообразие предсказаний относительно среднего)
+
+![](http://scott.fortmann-roe.com/docs/docs/BiasVariance/biasvariance.png)
+
+И еще про переобучение и ошибку
+
+![](http://jnguyen92.github.io/nhuyhoa/figure/source/2015-12-27-Bias-Variance/unnamed-chunk-2-1.png)
+
+### Данные: классификация
+
+Работаем с данными про типы стекла
+
+```{r}
+library(mlbench)
+data(Glass)
+#?Glass
+table(Glass$Type)
+library(ggplot2)
+ggplot(data = Glass) + geom_point(aes(x = Ca, y = Na, col = Type))
+```
+
+Разобьем на тестовую и обучающую. Сегодня сделаем это с помощью функций пакета `caret`
+
+```{r}
+library(caret)
+set.seed(3456)
+trainIndex <- createDataPartition(Glass$Type, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+head(trainIndex)
+
+GlassTrain <- Glass[ trainIndex,]
+GlassTest  <- Glass[-trainIndex,]
+
+```
+
+Строим дерево решений 
+```{r}
+library(partykit)
+modelTree<-ctree(Type~., data=GlassTrain)
+plot(modelTree, type = "simple", gp = gpar(cex=0.55))
+```
+
+Предсказание на обучающей выборке
+```{r}
+Glass.predictionsTrain <- predict(modelTree, GlassTrain)
+head(Glass.predictionsTrain)
+cmTr = confusionMatrix(Glass.predictionsTrain, GlassTrain$Type)
+cmTr
+```
+
+Предсказание на тестовой выборке
+```{r}
+Glass.predictionsTest <- predict(modelTree, GlassTest)
+head(Glass.predictionsTest)
+cmTest = confusionMatrix(Glass.predictionsTest, GlassTest$Type)
+cmTest
+```
+
+* А что будет, если сделать другое разбиение на тестовую и обучающую выборки?
+
+```{r}
+set.seed(1)
+trainIndex2 <- createDataPartition(Glass$Type, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+GlassTrain2 <- Glass[ trainIndex2,]
+GlassTest2  <- Glass[-trainIndex2,]
+modelTree2<-ctree(Type~., data=GlassTrain2)
+
+plot(modelTree2, type = "simple", gp = gpar(cex=0.55))
+
+Glass.predictionsTrain2 <- predict(modelTree2, GlassTrain2)
+cmTr2 = confusionMatrix(Glass.predictionsTrain2, GlassTrain2$Type)
+cmTr2
+
+Glass.predictionsTest2 <- predict(modelTree2, GlassTest2)
+cmTest2 = confusionMatrix(Glass.predictionsTest2, GlassTest2$Type)
+cmTest2
+```
+
+Сравним точности
+
+```{r}
+cmTest$overall["Accuracy"]
+cmTest2$overall["Accuracy"]
+```
+
+Посмотрим на одном и том же тестовом датасете
+```{r}
+Glass.predictionsTest3 <- predict(modelTree2, GlassTest)
+cmTest3 = confusionMatrix(Glass.predictionsTest3, GlassTest$Type)
+cmTest$overall["Accuracy"]
+cmTest3$overall["Accuracy"]
+```
+
+* Какое значение правильное? Как выбрать?
+
+### Cross-validation
+
+* Что делать, если при случайном выборе нам попалась очень специфичная обучающая выборка?
+
+Кросс-валидация = повторение процесса с разделением на тестовую и обучающую несколько раз и подсчет среднего значения
+
+#### k-fold Cross Validation
+
+* разделяем на k частей
+* используем k-1 часть как обучающую, последнюю -- как тестовую
+* повторяем k раз
+* считаем среднее
+
+![](https://pp.userapi.com/c841225/v841225199/23beb/mBTYwuqVlYw.jpg)
+
+```{r message = F, warning=F}
+train_control <- trainControl(method="cv", number=10)
+model <- train(Type~., data=GlassTrain, trControl=train_control, method="ctree")
+print(model)
+ggplot() + geom_line(aes(y = model$resample$Accuracy, x = 1:10)) + xlab("Fold") + ylab("Accuracy")
+```
+
+Посмотрим предсказание на первоначальной тестовой выборке.
+
+```{r}
+Glass.predictionsTest.cv <- predict(model, GlassTest)
+cmTest.cv = confusionMatrix(Glass.predictionsTest.cv, GlassTest$Type)
+cmTest.cv
+```
+
+* Что вы можете сказать о результатах?
+
+#### Leave One Out Cross Validation
+
+Частный случай k-fold валидации, где k = числу наблюдений (NB! работает долго)
+
+```{r message = F, warning=F, eval = F}
+train_control <- trainControl(method="LOOCV")
+model2 <- train(Type~., data=GlassTrain, trControl=train_control, method="ctree")
+print(model2)
+Glass.predictionsTest.cv2 <- predict(model, GlassTest)
+cmTest.cv2 = confusionMatrix(Glass.predictionsTest.cv2, GlassTest$Type)
+cmTest.cv2 
+```
+
+#### Repeated k-fold Cross Validation
+
+k-fold валидации повторяется несколько раз, результаты усредняются
+
+```{r}
+train_control <- trainControl(method="repeatedcv", number=10, repeats=5)
+model3 <- train(Type~., data=GlassTrain, trControl=train_control, method="ctree")
+print(model3)
+Glass.predictionsTest.cv3 <- predict(model, GlassTest)
+cmTest.cv3 = confusionMatrix(Glass.predictionsTest.cv3, GlassTest$Type)
+cmTest.cv3
+```
+
+### Данные: регрессия
+
+Взаимосвязь рекламы и уровня продаж
+
+```{r}
+Advertising = read.csv("~/shared/minor3_2017/3-SecondYear-ML/practice-3-cv/Advertising.csv")
+Advertising = Advertising[,-1]
+ggplot(data = Advertising) + geom_histogram(aes(x = sales), binwidth = 1)
+```
+
+Разделим на тестовую и обучающую
+
+```{r}
+set.seed(3)
+trainIndex <- createDataPartition(Advertising$sales, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+head(trainIndex)
+
+AdvTrain <- Advertising[ trainIndex,]
+AdvTest  <- Advertising[-trainIndex,]
+
+```
+
+Строим модель
+```{r}
+modelLM<-lm(sales ~., data=AdvTrain)
+summary(modelLM)
+```
+
+**Ваша очередь:** Посчитайте ошибку предсказания на обучающей и тестовой выборке
+
+Посчитаем немного другой показатель ошибки -- RMSE
+```{r}
+Adv.predictionsTest <- predict(modelLM, AdvTest)
+RMSE = sqrt(mean((Adv.predictionsTest - AdvTest$sales)^2))
+RMSE
+```
+
+
+Построим модель методом кросс-валидации
+
+```{r}
+train_control <- trainControl(method="cv", number=10)
+modelLM.cv <- train(sales~., data=AdvTrain, 
+                    trControl=trainControl(method="cv", number=10), 
+                    method="lm")
+print(modelLM.cv)
+modelLM.cv$resample
+ggplot() + geom_line(aes(y = modelLM.cv$resample$RMSE, x = 1:10)) + xlab("Fold") + ylab("RMSE")
+sd(modelLM.cv$resample$RMSE)
+```
+
+Посмотрим предсказание на первоначальной тестовой выборке.
+
+```{r}
+Adv.predictionsTest.cv <- predict(modelLM.cv, AdvTest)
+RMSE.cv = sqrt(mean((Adv.predictionsTest.cv - AdvTest$sales)^2))
+RMSE.cv
+```
+
+* Что вы можете сказать о результатах?
+* Попробуйте другие параметры кросс-валидации. Что изменилось?
+
+**Ваша очередь:** Постройте регрессионную модель с помощью дерева решений, используя метод кросс-валидации. Сравните с линейной регрессией
+
+
+**Ваша очередь:** 
+
+Постройте модели для следующих наборов данных (не забудьте посмотреть справку и определить тип задачи (регрессия или классификация)
+
+```{r message = F, warning=FALSE}
+library(ISLR)
+```
+
+1. `Wage`, предсказываемая переменная `wage`
+
+```{r eval = F}
+?ISLR::Wage
+library(dplyr)
+Wage = ISLR::Wage
+table(Wage$region)
+```
+
+2. `Caravan`, предсказываемая переменная `Purchase`
+
+```{r eval = F}
+?ISLR::Caravan
+caravan = ISLR::Caravan
+
+## возможный способ сокращения ответов "Нет"
+library(dplyr)
+caravanNo = filter(caravan, Purchase == "No")
+caravanNo = sample_n(caravanNo, size = 400)
+caravan = caravan %>% filter(Purchase == "Yes") %>% rbind(caravanNo)
+```
+
+

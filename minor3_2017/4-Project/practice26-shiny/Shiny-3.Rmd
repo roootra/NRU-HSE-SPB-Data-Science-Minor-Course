@@ -1,0 +1,149 @@
+---
+title: "И снова Shiny"
+output: html_document
+---
+
+Сегодня мы еще раз поговорим про Shiny. 
+
+* рассмотрим еще раз, как преобразовать готовый код в приложение
+* посмотрим, как автоматически переносить данные (переменные, значения и т.д.) в интерфейс из датасета (а не перепечатывать вручную)
+* еще раз поговорим об оптимальности и структуре программы, а точнее о том, как можно сохранять результаты и модели и переиспользовать их потом в готовом виде, а не перезапускать код заново
+
+В качестве примера возьмем лабораторную про ансамбли (practice_7).
+
+Сразу уберем из нее части, связанные с исследованием, т.е. те, где мы смотрим на данные, строим разведочный график, пробуем разные реализации одного и того же метода, выводим в консоль результаты и т.д. Нас интересует только последняя часть с разными вариантами ансамблей.
+
+Используем датасет про Бостон, т.е. предсказываем цену жилья
+
+```{r}
+library(MASS)
+library(caret)
+library(partykit)
+set.seed(1)
+train_ind = sample(1:nrow(Boston), nrow(Boston)*0.7)
+boston.test=Boston[-train_ind,]
+boston.train=Boston[train_ind,]
+
+# Построим три модели: дерево, линейную регрессию и регрессию с регуляризацией
+trC = trainControl(method = "cv", number = 10)
+model.1.tree = caret::train(medv~., data=boston.train, method = "ctree", trControl = trC)
+pred.1.tree = predict(model.1.tree, newdata = boston.test)
+
+model.2.lm = train(medv~., data=boston.train, method = "lm", trControl = trC)
+pred.2.lm = predict(model.2.lm, newdata = boston.test)
+
+model.3.reg = train(medv~., data=boston.train, method = "glmnet", trControl = trC)
+pred.3.reg = predict(model.3.reg, newdata = boston.test)
+
+#Итоговое предсказание на тестовой выборке - Averaging
+pred.final = (pred.1.tree + pred.2.lm + pred.3.reg)/3
+
+#Stacking
+dataStack = data.frame(tree = predict(model.1.tree, newdata = boston.train), 
+                       lm = predict(model.2.lm, newdata = boston.train), 
+                       reg = predict(model.3.reg, newdata = boston.train),
+                       medv = boston.train$medv)
+model.tree = train(medv~., data=dataStack, method = "ctree")
+dataStack.test = data.frame(tree = pred.1.tree, lm = pred.2.lm, reg = pred.3.reg)
+pred.tree = predict(model.tree, newdata = dataStack.test)
+```
+
+Теперь будем преобразовывать этот код в приложение.
+
+1) **Что хотим:** приложение, которое предсказывает стоимость жилья для нескольких случайных элементов из тестовой выборки (для упрощения вместо ввода всех значений) В качестве результата -- таблица с предсказанными ценами
+2) **Что может менять пользователь:** сколько данных из тестовой выборки использовать, какой метод использовать Averaging или Stacking
+
+
+####Начинаем...
+
+В этот раз в нашем приложении есть одна особенность -- мы не меняем разбиение на тестовую и обучающую и не перестраиваем первоначальные три модели, действия пользователя на это не влияют. При этом постороение моделей занимает время. Поэтому для ускорения мы выполним эти действия заранее (уже сделано выше) и сохраним результат. Для дальшейшей работы нам нужны:
+
+* model.1.tree
+* model.2.lm
+* model.3.reg
+* boston.test
+* boston.train
+
+Сохраняем
+
+```{r}
+save(model.1.tree, model.2.lm, model.3.reg, boston.test, boston.train, model.tree, 
+     file = "~/models.RData")
+```
+
+Загрузить их можно теперь с помощью функции load()
+
+
+Интерфейс:
+
+* поле для ввода числа строк
+* поле для выбора 
+* таблица с результатами
+
+Нам нужно, чтобы выбор числа строк не превышал число строк в тестовой выборке, соответственно, данные используем и в интерфейсе тоже, поэтому загружаем сохраненные объекты  **вне** функций:
+
+```{r eval = F}
+load("models.RData")
+
+ui <- fluidPage(
+   titlePanel("Ансамбли"),
+   sidebarLayout(
+      sidebarPanel(
+         sliderInput("num",
+                     "Установите число строк",
+                     min = 1,
+                     max = nrow(boston.test),
+                     value = 1),
+         selectInput("method",
+                     "Выберите переменные для анализа",
+                     choices = c("Averaging", "Stacking"))   
+         
+      ),
+      mainPanel(
+         tableOutput("metrics")
+      )
+   )
+)
+```
+   
+Сервер: нам нужна таблица
+
+```{r eval = F}
+server <- function(input, output) {
+   
+   output$metrics <- renderTable({ })
+}
+```
+
+
+Реализуем основную функцию
+
+```{r eval = F}
+server <- function(input, output) {
+  
+  selectedData = reactive({
+    boston.ind = sample(nrow(boston.test), input$num)
+    boston.test[boston.ind,]
+  })
+  
+   output$metrics <- renderTable({
+     boston.data = selectedData()
+     pred.1.tree = predict(model.1.tree, newdata = boston.data)
+     pred.2.lm = predict(model.2.lm, newdata = boston.data)
+     pred.3.reg = predict(model.3.reg, newdata = boston.data)
+     
+     if(input$method == "Averaging"){
+       res =  (pred.1.tree + pred.2.lm + pred.3.reg)/3
+     }else{
+       dataStack.test = data.frame(tree = pred.1.tree, lm = pred.2.lm, reg = pred.3.reg)
+       res = predict(model.tree, newdata = dataStack.test)
+     }
+     boston.data = cbind(res,boston.data)
+     boston.data
+
+   })
+}
+```
+
+
+

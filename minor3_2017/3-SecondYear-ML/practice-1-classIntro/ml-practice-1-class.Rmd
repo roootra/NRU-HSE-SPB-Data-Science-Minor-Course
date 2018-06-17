@@ -1,0 +1,205 @@
+---
+title: "ML practice 1: classification"
+output: html_document
+---
+
+Сегодня мы посмотрим на результаты классификации на нескольких датасетах. Сначала перечислим датасеты, с которыми затем будем работать.
+
+### 1. Ирисы
+
+Популярный учебный датасет про три сорта ирисов
+
+```{r}
+data(iris)
+```
+
+Посмотрим на данные:
+
+```{r, warning=FALSE}
+library(ggplot2)
+library(GGally)
+ggpairs(iris, mapping = aes(color = Species))
+```
+
+
+### 2. Рак груди
+
+Второй датасет, с которым мы работаем сегодня -- результаты диагностики опухоли груди. Вызовите справку по датасету `?mlbench::BreastCancer`
+
+* какой размер датасета?
+* какие переменные в нем есть?
+
+
+```{r}
+library(mlbench)
+data(BreastCancer)
+library(dplyr)
+BreastCancer = select(BreastCancer, -Id)
+```
+
+Зачем выполнена последняя операция?
+
+```{r message = F, warning=FALSE}
+ggpairs(BreastCancer, columns = c(1,2,3,4))
+```
+
+**Ваша  очередь:** Постройте подобный график только для других переменных
+
+```{r message = F, warning=FALSE}
+#put some code here
+
+```
+
+# Деревья решений: recap
+
+Используем пакет `partykit`.
+
+```{r}
+library(partykit)
+```
+
+Построим дерево (ирисы)
+
+```{r fig.width=12}
+tree.iris <- ctree(Species~., data = iris)
+tree.iris
+plot(tree.iris, type = "simple")
+plot(tree.iris)
+```
+
+* Какие "правила" получились?
+
+Построим более сложное дерево (рак груди)
+
+```{r fig.width=12}
+tree.breast <- ctree(Class~., data = BreastCancer)
+plot(tree.breast, type = "simple")
+```
+
+* Можете ли вы "прочитать" это дерево?
+* Какие "правила" получились?
+* Все ли переменные из данных использованы?
+
+Но насколько хорошо такие правила описывают закономерности?
+
+# Обучающая и тестовая выборки
+
+Отделим 20\% от каждого датасета. Эта часть не будет использоваться для обучения модели, но на ней мы будем проверять (тестировать), насколько  хороша наша модель. 
+
+* Зачем это нужно делать?
+
+Для ирисов:
+
+```{r message = F, warning=FALSE}
+set.seed(100) #You shoud put here your own number
+iris.test.ind = sample(seq_len(nrow(iris)), size = nrow(iris)*0.2)
+iris.test = iris[iris.test.ind,]
+iris.main = iris[-iris.test.ind,]
+```
+
+**Ваша очередь:** сделайте подобное разделение для оставшегося датасета.
+
+```{r message = F, warning=FALSE}
+# your code here
+```
+
+# Построение моделей
+
+### Ирисы
+
+Обучение: (**NB!** только на обучающей -- `iris.main`)
+```{r}
+tree.iris <- ctree(Species~., data = iris.main)
+plot(tree.iris, type = "simple")
+```
+
+Для представления результатов мы часто будем использовать пакет `caret` <https://topepo.github.io/caret/index.html>. Это пакет-обертка -- дает возможность одинакового доступа к функциям, реализующим разные методы машинного обучения: названия методов, позволяющих посчитать, например, матрицу совпадений (ниже) или предсказать новые результаты по уже построенной модели, могут отличаться от разработчика к разработчику. `caret` позволяет не задумываться об этом и использовать одни названия для однотипных действий.
+
+Результаты на обучающей
+
+```{r}
+library(caret)
+rpartPred <- predict(tree.iris, iris.main, type = "response")
+confusionMatrix(rpartPred,iris.main$Species)
+cm<-confusionMatrix(rpartPred,iris.main$Species)
+cm$overall
+```
+
+* Как устроена матрица соответствий (confusion matrix)
+* Хорошая это точность или нет?
+
+Результаты на тестовой выборке
+
+```{r}
+rpartPred <- predict(tree.iris, iris.test, type = "response")
+confusionMatrix(rpartPred, iris.test$Species)
+```
+
+* Сравните с результатом на обучающей. Что можете сказать?
+
+
+### Рак груди
+
+Разбиение на тестовую и обучающую (уже сделали чуть раньше)
+
+```{r message = F, warning=FALSE}
+set.seed(100) #You shoud put here your own number
+br.test.ind = sample(seq_len(nrow(BreastCancer)), size = nrow(BreastCancer)*0.2)
+breast.test = BreastCancer[br.test.ind,]
+breast.main = BreastCancer[-br.test.ind,]
+```
+
+Построение модели
+```{r}
+tree.breast <- ctree(Class~., data = breast.main)
+plot(tree.breast, type = "simple")
+```
+
+Метрики (malignant = злокачественная, benign = доброкачественная)
+
+```{r}
+breastPred <- predict(tree.breast, breast.main, type = "response")
+confusionMatrix(breastPred,breast.main$Class)
+```
+
+## Еще раз про метрики
+
+![](https://images.nature.com/full/nature-assets/nmeth/journal/v13/n8/images_article/nmeth.3945-F1.jpg)
+
+Посчитаем Accuracy, Recall = Sensitivity, Precision = Positive Predictive Value
+
+Результаты на тестовой выборке
+
+```{r}
+breastPred <- predict(tree.breast, breast.test, type = "response")
+confusionMatrix(breastPred,breast.test$Class)
+```
+
+**Ваша  очередь:** 
+
+Постройте модели для указанных ниже задач. Не забудьте разделить на тестовую и обучающую выбоорки и интерпретировать результаты
+
+### 3. Детские кресла
+
+Уже рассмотренные в прошлом году данные про продажи детских автомобильных кресел. Задача: предсказать уровень продаж. Т.к. задача классификации предполагает, что целевая переменная (в нашем случае -- продажи Sales), должна быть категориальной, то изменим немного наши данные -- разделим их на высокие и низкие.
+
+```{r}
+library(ISLR)
+library(dplyr)
+carseats <- ISLR::Carseats
+сarseats <- carseats %>% 
+  mutate(High = ifelse(Sales <= 8, "No", "Yes")) %>% 
+  dplyr::select(-Sales) 
+```
+
+### 4. Виды стекла (Glass Identification Database)
+
+Задача: по указанным параметрам (см. справку) предсказать, к какому классу относится стекло.
+
+```{r, warning=FALSE}
+library(mlbench)
+data(Glass)
+ggpairs(Glass, mapping = aes(color = Type))
+```
+
+

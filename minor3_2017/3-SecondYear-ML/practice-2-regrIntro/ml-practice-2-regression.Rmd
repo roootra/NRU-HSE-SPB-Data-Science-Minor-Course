@@ -1,0 +1,290 @@
+---
+title: "Regression"
+output: 
+  html_document:
+    mathjax: https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML
+---
+
+Сегодня на занятии рассмотрим задачи регресcии
+
+**Ваша очередь:**
+
+* В чем отличие задач регресcии от классификации?
+* Задача регрессии -- это задача обучения с учителем или обучения без учителя?
+
+### Данные
+
+Работаем с данными про цены на жилье в Бостоне
+
+```{r}
+library(MASS)
+#?Boston
+```
+
+* `crim` per capita crime rate by town
+* `zn` proportion of residential land zoned for lots over 25,000 sq.ft
+* `indus` proportion of non-retail business acres per town
+* `chas` Charles River dummy variable (= 1 if tract bounds river; 0 otherwise).
+* `nox` nitrogen oxides concentration (parts per 10 million).
+* `rm` average number of rooms per dwelling.
+* `age` proportion of owner-occupied units built prior to 1940.
+* `dis` weighted mean of distances to five Boston employment centres.
+* `rad` index of accessibility to radial highways.
+* `tax` full-value property-tax rate per \$10,000.
+* `ptratio` pupil-teacher ratio by town.
+* `black` 1000(Bk - 0.63)^2 where Bk is the proportion of blacks by town.
+* `lstat` lower status of the population (percent).
+* `medv` median value of owner-occupied homes in \$1000s.
+
+```{r results='asis'}
+data(Boston)
+pander::pandoc.table(head(Boston), split.tables=Inf)
+```
+
+Посмотрим на данные:
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+ggplot(data = Boston) + geom_histogram(aes(x = medv))
+library(GGally)
+ggpairs(Boston[, 2:5])
+```
+
+* Нужно ли нам логарифмировать предсказываемую переменную `medv`? В каких случаях нужны трансформации?
+
+# Обучающая и тестовая выборки
+
+Отделим 20\% от датасета. Как обычно, эта часть не будет использоваться для обучения модели, но на ней мы будем проверять (тестировать), насколько  хороша наша модель. 
+
+```{r message = F, warning=FALSE}
+set.seed(6) 
+Boston.test.ind = sample(seq_len(nrow(Boston)), size = nrow(Boston)*0.2)
+Boston.test = Boston[Boston.test.ind,]
+Boston.train = Boston[-Boston.test.ind,]
+
+```
+
+### Деревья решений (повторение)
+
+Построение модели
+```{r}
+library(partykit)
+modelTree<-ctree(medv~.,data=Boston.train)
+plot(modelTree, type = "simple")
+#plot(modelTree)
+```
+
+* Как интерпретировать модель? 
+* Какие правила можно получить? 
+* Как делать предсказание на новых данных?
+
+Предсказание на тестовой выборке
+```{r}
+tree.predictions <- predict(modelTree, Boston.test)
+head(tree.predictions)
+```
+
+Соответствие предсказанных и реальных значений:
+
+```{r}
+ggplot() + geom_point((aes(x=Boston.test$medv, y=tree.predictions))) +
+  geom_abline(color="red") +
+  xlab("Real value") +
+  ylab("Predicted value")
+```
+
+
+Ошибка предсказания (насколько наше предсказание отличается от фактических значений)
+```{r}
+tree.test.RSS = sum((tree.predictions-Boston.test$medv)^2)
+tree.test.RSS
+```
+
+* Что показывает это число?
+
+Одна из особенностей регрессионных деревьев -- в качестве предсказания используются всего несколько значений (средние по группам). Существуют и более гибкие инструменты для решения задач регрессии
+
+### Линейная регрессия
+
+Начнем с простой модели (**Simple Linear Regression**) -- когда у нас всего один предиктор. В частности, можем ли мы предсказать цену на жилье в районе на основе доли населения с низким социальным статусом (`lstat`)?
+
+В целом, мы хотим приблизить наши данные в виде зависимости $Y = a*X+b$ или в нашем случае $medv = a*lstat+b$, т.е. построить прямую
+
+```{r}
+ggplot()+geom_point(data = Boston.train, aes(x = lstat, y = medv))
+```
+
+
+```{r}
+lm.fit=lm(medv~lstat, data=Boston.train) 
+```
+
+Посмотрим на результат
+
+```{r}
+lm.fit
+```
+
+Более подробное представление результата
+
+```{r}
+summary(lm.fit)
+```
+
+
+Кроме варианта "все сразу в одном выводе" можно использовать и доступ к отдельным элементам, характеризующим построенную модель. Варианты:
+
+```{r}
+names(lm.fit)
+coef(lm.fit)
+coef(lm.fit)[1]
+```
+
+ggplot2 позволяет строить регресионные прямые даже без предварительного построения модели
+
+```{r}
+ggplot(data = Boston.train, aes(x = lstat, y = medv))+
+  geom_point() + 
+  geom_smooth(method = "lm", formula = y~x)
+```
+
+Для тренировки можем посчитать отклонения и общую ошибку вручную
+```{r}
+y = Boston.test$medv # real y values
+y_hat = coef(lm.fit)[1] + coef(lm.fit)[2]*Boston.test$lstat #predicted y values
+
+rss = sum((y - y_hat)^2)
+
+y_naive = mean(Boston.test$medv)
+
+tss = sum(((y - y_naive)^2))
+
+1 - (rss/tss) # r^2
+```
+
+.. но вручную делать предсказания вообще-то не нужно
+
+```{r}
+lm.predictions <- predict(lm.fit, Boston.test)
+
+ggplot()+geom_point((aes(x=Boston.test$medv, y=lm.predictions))) + 
+  geom_abline(color="red") +
+  xlab("Real value") +
+  ylab("Predicted value")
+```
+
+Ошибка предсказания
+
+```{r}
+lm.test.RSS = sum((lm.predictions-Boston.test$medv)^2)
+lm.test.RSS
+```
+
+
+Переходим к более сложному случаю -- когда предикторов несколько (**Multiple Linear Regression**). Например, добавим возраст
+
+```{r}
+lm.fit=lm(medv~lstat+age,data=Boston.train)
+summary(lm.fit)
+```
+
+Или, что более правильно -- логарифм возраста (почему?)
+
+```{r}
+lm.fit=lm(medv~lstat+log(age),data=Boston.train)
+summary(lm.fit)
+```
+
+Или все переменные
+
+```{r}
+lm.fit=lm(medv~.,data=Boston.train) 
+summary(lm.fit)
+```
+
+Регрессионный анализ имеет ряд предположений и ограничений и, соответственно, различных тестов, которые проверяют эти ограничения. Один из них -- проверка мультиколлинеарности (взаимосвязи между некоторыми предикторами).
+
+```{r}
+arm::corrplot(Boston.train)
+car::vif(lm.fit)
+```
+
+Один из методов проверки -- переменная подозрительна на мультиколлинеарность, если $\sqrt{VIF} > 2$, более мягкая версия $VIF > 10$
+
+```{r}
+sqrt(car::vif(lm.fit)) > 2
+```
+
+Удаляем переменные из модели
+
+```{r}
+lm.fit1=lm(medv~.-rad-tax-nox,data=Boston.train)
+summary(lm.fit1)
+```
+
+Можно вносить изменения в уже построенную модель
+
+```{r}
+lm.fit1=update(lm.fit1, ~.-age)
+summary(lm.fit1)
+```
+
+**Трансформация предикторов**
+
+Вернемся с простой модели
+
+```{r}
+ggplot()+geom_point(data = Boston.train, aes(x = lstat, y = medv))
+```
+
+Можно заметить, что зависимость не линейная. Отразим это в модели
+
+```{r}
+lm.fit2=lm(medv~lstat+I(lstat^2), data=Boston.train) 
+summary(lm.fit2)
+```
+
+*Функция I() нужна для того, чтобы действительно произошло воведение в квадрат, т.к. символ ^ в формуле означает пересечение: (a + b)^2 = a + b + a:b*
+
+Сравним с первоначальной моделью (на обучающей выборке)
+
+```{r}
+lm.fit0=lm(medv~lstat, data=Boston.train)
+anova(lm.fit0,lm.fit2) # так можно сравнить на обучающей выборке
+```
+
+На тестовой выборке
+```{r}
+lm.predictions2 <- predict(lm.fit2, Boston.test)
+lm.test.RSS2 = sum((lm.predictions2-Boston.test$medv)^2)
+lm.test.RSS2
+```
+
+А значение для первоначальной модели было
+```{r}
+lm.test.RSS
+```
+
+
+**Ваша очередь:** 
+
+* Посчитайте ошибки для моделей с большим числом предикторов. Какая лучше?
+
+* Постройте регрессионые модели для данных о продаже (`Sales`) детских кресел
+
+```{r message = F, warning=FALSE}
+library(ISLR)
+data(Carseats)
+```
+
+```{r eval = F}
+?Carseats
+```
+
+```{r message = F, warning=FALSE, results='asis'}
+pander::pandoc.table(head(Carseats), split.tables=Inf)
+```
+
+* Какая модель дает лучшее предсказание на тестовой выборке? Какие предикторы в нее входят? 
+* Какие продажи будут в регионе с населением 200 тысяч, уровнем образования 16 и доходом $75000 при тратах на рекламу $2000 (все остальные значения берутся средними по выборке)?
+

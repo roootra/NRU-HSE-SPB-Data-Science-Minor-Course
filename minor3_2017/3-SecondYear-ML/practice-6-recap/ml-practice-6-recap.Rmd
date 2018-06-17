@@ -1,0 +1,276 @@
+---
+title: "ML practice 6: recap"
+output: html_document
+---
+## Немного организационного
+
+Один из компонентов итоговой оценки за семестр -- прохождение онлайн-курса по ML. Для зачета по этой части необходимо выполнить не меньше 60% курса. 
+
+**Базовый** рекомендованный курс [Statistical Learning от Stanford](https://lagunita.stanford.edu/courses/HumanitiesSciences/StatLearning/Winter2016/about). Еще есть книга [An Introduction to Statistical Learning with Applications in R](http://www-bcf.usc.edu/~gareth/ISL/)
+
+Возможные курсы:
+
+* [Machine Learning by Andrew Ng на Coursera](https://www.coursera.org/learn/machine-learning) (глубже про математические основы)
+* [Practical Machine Learning на Coursera](https://www.coursera.org/learn/practical-machine-learning) (про пакет caret)
+* [Introduction to Machine Learning на DataCamp](https://www.datacamp.com/courses/introduction-to-machine-learning-with-r)
+* Supervised Learning in R на DataCamp [Regression](https://www.datacamp.com/courses/supervised-learning-in-r-regression) + [Classification](https://www.datacamp.com/courses/supervised-learning-in-r-classification)
+
+Плюс можно выбрать курс самостоятельно, но при этом его нужно согласовать с преподавателем.
+
+
+## Резюме занятий
+
+Сегодня занятие на повторение и обобщение изученного. Итак, что мы рассмотрели за первый модуль:
+
+* Обучение с учителем. Регрессия vs классификация
+* Разделение на тестовую и обучающую выборки: зачем и кому это нужно (`createDataPartition()`)
+* Bias-variance tradeoff
+* Кросс-валидация (`caret::train(..., trControl = trainControl(method="cv", number=10))`)
+* Несбалансированные выборки (`caret::train(..., trControl = trainControl(..., sampling = "down"))`)
+* Ошибки предсказания и качество предсказания
+    * Регрессия: RSS, RMSE
+    * Классификация: accuracy, precision, recall, sensitifity, specificity (`caret::confusionMatrix()`)
+    * Классификация с возможностью сдвига границы между классами: ROC, AUC (`pROC::roc()`, `pROC::auc()`)
+* Алгоритмы
+    * Регрессия: 
+        * регрессионное дерево (`ctree()`)
+        * линейная регрессия (`lm()`)
+        * регрессия с регуляризацией (`glmnet()`)
+    * Классификация: 
+        * классификационное дерево (`ctree()`)
+        * метод опорных векторов (`svm()`)
+        * метод k ближайших соседей (`knn3()`, `knn()`)
+        * логистическая регрессия (`glm(..., family = binomial(link = "logit"))`)
+        * логистическая регрессия с регуляризацией (`glmnet(..., family = "binomial")`)
+
+Все эти методы можно  вызывать и с помощью пакета `caret`. Например:
+
+* `caret::train(..., method = 'knn')`
+* `caret::train(..., method = 'svmPoly')`
+* `caret::train(..., method = 'glmnet')`
+* [поддерживаемые модели](https://topepo.github.io/caret/available-models.html)
+
+Примерный алгоритм действий 
+
+1. Исследуем данные
+2. Нормируем, центрируем значения, если это нужно
+3. Определяем тип задачи -- регрессия или классификация
+4. Смотрим сбалансированность / несбалансированность выборки
+5. Определяем метод оценки качества предсказания
+6. Разделяем на тестовую и обучающую выборки
+7. *Выбираем / конструируем предикторы* (подробнее будем говорить в следующем модуле)
+8. Строим модель 1 с помощью подходящего алгоритма
+9. Оцениваем качество модели (не забывая про кросс-валидацию)
+10. Повторяем 7-9 для других моделей (другие алгоритмы или другой набор предикторов)
+11. *Выбираем лучшую модель* (пока -- по наилучшему качеству (п.4), о разных нюансах и более подробно в следующем модуле)
+12. Profit!
+
+## Практика
+
+А теперь тренируемся!
+
+```{r}
+library(caret)
+library(ggplot2)
+library(dplyr)
+```
+
+
+### Данные
+
+Датасет, с которым мы работаем сегодня -- о прокате велосипедов. Хотим предсказывать, сколько человек воспользуются прокатом. Файл, с которым мы будем работать, с Kaggle <https://www.kaggle.com/c/bike-sharing-demand/data>, но первоначальный (немного почищенный -- см. для сравнения hour.csv и DatasetDescription.txt) - с UCI Machine Learning Repository <https://archive.ics.uci.edu/ml/datasets/Bike+Sharing+Dataset>
+
+> Кстати, если хочется посмотреть на качество итоговой модели по сравнению с остальными, то можно поучаствовать в соревновании на Kaggle <https://www.kaggle.com/c/bike-sharing-demand>. Только обратите внимание, что там в качестве предсказания используется Root Mean Squared Logarithmic Error [(RMSLE)](https://www.kaggle.com/c/bike-sharing-demand#evaluation) 
+
+Данные о прокате за 2011 и 2012 гг. от Capital Bikeshare system, Washington D.C., USA 
+
+* datetime - hourly date + timestamp  
+* season -  1 = spring, 2 = summer, 3 = fall, 4 = winter 
+* holiday - whether the day is considered a holiday
+* workingday - whether the day is neither a weekend nor holiday
+* weather 
+
+    1: Clear, Few clouds, Partly cloudy, Partly cloudy 
+    2: Mist + Cloudy, Mist + Broken clouds, Mist + Few clouds, Mist 
+    3: Light Snow, Light Rain + Thunderstorm + Scattered clouds, Light Rain + Scattered clouds 
+    4: Heavy Rain + Ice Pallets + Thunderstorm + Mist, Snow + Fog 
+* temp - temperature in Celsius
+* atemp - "feels like" temperature in Celsius
+* humidity - relative humidity
+* windspeed - wind speed
+* casual - number of non-registered user rentals initiated
+* registered - number of registered user rentals initiated
+* count - number of total rentals
+
+
+```{r}
+bike = read.csv("~/shared/minor3_2017/3-SecondYear-ML/practice-6-recap/train.csv")
+str(bike)
+```
+
+Преобразуем переменные к факторам или наоборот, где нужно
+
+```{r}
+bike$datetime = as.character(bike$datetime)
+bike$season = as.factor(bike$season)
+bike$holiday = as.factor(bike$holiday)
+```
+
+Преобразуем дату к формату даты и извлечем из нее отдельно год, месяц, день недели
+
+```{r}
+library(lubridate)
+head(bike$datetime)
+tail(bike$datetime) #значит, дата в формате год-месяц-день время
+bike$datetime = ymd_hms(bike$datetime)
+bike = bike %>% mutate(year = factor(year(datetime)), month = month(datetime), weekday = wday(datetime))
+```
+
+Посмотрим на температуру и влажность
+```{r}
+summary(bike$temp)
+summary(bike$humidity)
+```
+
+* Нужно ли их нормализовывать?
+
+```{r}
+bike$temp = bike$temp/(max(bike$temp) - min(bike$temp))
+```
+
+* Какую задачу решаем? Регрессия или классификация?
+
+```{r}
+ggplot(data = bike) + geom_histogram(aes(x = count))
+```
+
+* Какую метрику будем использовать для оценки качества?
+
+* Разбиение на тестовую и обучающую
+
+```{r message = F, warning=FALSE}
+set.seed(100) #You shoud put here your own number
+test.ind = createDataPartition(bike$count, p = 0.2, list = FALSE)
+bike.test = bike[test.ind,]
+bike.main = bike[-test.ind,]
+```
+
+* Построим модель на основе температуры, времени года и праздник / не праздник. Будем сразу строить модель с учетом кросс-валидации
+
+```{r}
+set.seed(3)
+lm.model <- train(count~temp+season+holiday, data = bike.main, method = "lm",
+                  trControl = trainControl(method = "cv", number = 10))
+print(lm.model)
+```
+
+Посмотрим на модель
+
+```{r}
+summary(lm.model)
+```
+
+Посмотрим на стабильность предсказания
+
+```{r}
+ggplot() + geom_line(aes(y = lm.model$resample$RMSE, x = 1:10)) + xlab("Fold") + ylab("RMSE")
+```
+
+Посмотрим предсказание на тестовой выборке
+
+```{r}
+lm.predict = predict(lm.model, bike.test)
+RMSE.lm = sqrt(mean((lm.predict - bike.test$count)^2))
+RMSE.lm
+```
+
+Давайте теперь посмотрим на модель с регуляризацией
+
+```{r}
+library(glmnet)
+X.train <- model.matrix(count~temp+season+holiday-1, data=bike.main)
+X.test <- model.matrix(count~temp+season+holiday-1, data=bike.test)
+
+cv.glmnet.fit <- cv.glmnet(X.train, bike.main$count)
+cv.glmnet.fit
+best.lambda <- cv.glmnet.fit$lambda.min
+best.lambda
+lasso.model = glmnet(X.train, bike.main$count, lambda = best.lambda)
+coef(lasso.model)
+lasso.predictions <- predict(lasso.model, X.test)
+lasso.RMSE <- sqrt(mean((lasso.predictions-bike.test$count)^2))
+lasso.RMSE
+```
+
+Построим то же самое, но с помощью пакета `caret` (отличия в значениях из-за случайности в кросс-валидации, в методах разницы нет)
+
+```{r}
+net.model <- train(count~temp+season+holiday, data = bike.main, method = "glmnet",
+                  trControl = trainControl(method = "cv", number = 10))
+print(net.model)
+coef(net.model$finalModel)
+
+net.predict = predict(net.model, bike.test)
+RMSE.net = sqrt(mean((net.predict - bike.test$count)^2))
+RMSE.net
+```
+И наконец, можем посмотреть на дерево
+
+```{r}
+tree.model <- train(count~temp+season+holiday, data = bike.main, method = "ctree",
+                  trControl = trainControl(method = "cv", number = 10))
+print(tree.model)
+plot(tree.model$finalModel)
+
+tree.predict = predict(tree.model, bike.test)
+RMSE.tree = sqrt(mean((tree.predict - bike.test$count)^2))
+RMSE.tree
+ggplot() + geom_line(aes(y = tree.model$resample$RMSE, x = 1:10)) + xlab("Fold") + ylab("RMSE")
+```
+
+Какая модель лучше?
+
+```{r}
+RMSE.lm
+RMSE.net
+RMSE.tree
+```
+
+Можно построить распределение предсказаний по часам
+```{r}
+bike.test = bike.test %>% mutate(hour = factor(hour(datetime)))
+data = data.frame(hour  = bike.test$hour, predictCount = tree.predict)
+data %>% group_by(hour) %>% summarise(avgCount = mean(predictCount)) %>%
+  ggplot() + geom_bar(aes(x = hour, y = avgCount), stat = "identity")
+```
+
+* Это усредненные показатели. А что можно сделать, чтобы получить такое предсказание для конкретного дня?
+
+**Ваша  очередь:** 
+
+1. Попробуйте логарифмировать `count`. Изменилось ли что-то в структуре моделей? При изменении первоначального датасета не забудьте обновить тестовую и обучающую выборки
+
+```{r}
+bike$logcount = log(bike$count+1)
+bike.test = bike[test.ind,]
+bike.main = bike[-test.ind,]
+```
+
+И кстати, в таком случае удобно считать Root Mean Squared Logarithmic Error
+
+```{r}
+#RMSLE = sqrt(mean((predict - bike.test$logcount)^2)) нужно заменить predict на вектор предсказанных значений
+```
+
+2. У проката, очевидно, должны быть какие-то циклы в течение дня. Включите в модель hour как предиктор. Что изменилось?
+
+3. Посмотрите на остальные предикторы. Что еще можно добавить? Как преобразовать? Постройте другие модели, сравните. Не забудьте убрать из данных ненужные переменные, если используете `count~.`
+
+4. Представьте, что у вас обратная задача -- у вас есть данные о прокате, а нужно узнать, был ли день праздником или нет (переменная `holiday`). Дату в качестве предиктора использовать нельзя. 
+
+* Какой тип задачи в этом случае?
+* Сбалансированные ли данные?
+```{r}
+ summary(bike$holiday)
+```
+
