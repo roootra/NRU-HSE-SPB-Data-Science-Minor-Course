@@ -1,0 +1,279 @@
+---
+title: "Exploratory Data Analysis. Lab 5: Агрегация данных. Пакет dplyr"
+output: html_document
+---
+
+Сегодня мы будем учиться агрегации данных, которую можно осуществлять при помощи пакета `dplyr`. Для начала надо загрузить пакет `dplyr` и базу с данными о полетах самолетов, а также пакет `ggplot2`, с которым мы работали в прошлый раз.
+
+Не забывайте при выполнении ДЗ познакомиться с гл. 4 Managing Data Frames with the dplyr package из книжки Exploratory Data Analysis with R.
+
+Кроме того, обращайте внимание на то, что последние функции пакета dplyr можно найти в [dplyr cheatsheet](https://www.rstudio.com/wp-content/uploads/2015/02/data-wrangling-cheatsheet.pdf), также доступном в папке `minor2_2016/books`.
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr)
+library(nycflights13)
+library(ggplot2)
+```
+
+Чтобы познакомиться с переменными в базе, введите `?flights`
+
+```{r eval = F}
+?nycflights13::flights
+```
+**Ваша очередь:** Что за информация содержится в следующих переменных: `origin`, `distance`, `tailnum`, `carrier`, `dest`?
+
+Посмотрим, сколько наблюдений и переменных в базе, а также выведем 3 первые строчки. 
+
+```{r}
+dim(flights)
+head(flights, n = 3)
+```
+
+Удалим все строки с NA (строки, в которых есть хотя бы одно пропущенное значение).
+
+```{r}
+flData = nycflights13::flights
+flData = na.omit(flData)
+```
+
+Посмотрим, сколько осталось наблюдений и переменных в базе. 
+
+```{r}
+dim(flData)
+head(flData, n = 3)
+```
+
+**Ваша очередь:**
+
+Давайте вспомним, как работает ggplot.
+
+1) Нарисуйте boxplot (ящик с усами), в котором по оси X будут аэропорты Нью-Йорка, из которых вылетают самолеты, а по оси Y - дистанция.
+
+2) Нарисуйте гистограмму по переменной `hour`. Посмотрите, как работают параметры *coord_flip* и *coord_polar*. Также вспомните, как менять цвет у графика.
+
+3) Нарисуйте bar chart по переменной `carrier`. Закрасьте столбцы таким образом, чтобы можно было видеть, сколько перелетов для каждого перевозчика относятся к каждому из трех аэропортов, работающих в Нью-Йорке.
+
+Переходим к исследованию более сложных зависимостей (и более сложным условиям).
+
+Сначала напоминание про основную пунктуацию:
+
+* < - меньше
+* == - равно
+* != - не равно
+* | - или (выполнено хотя бы одно из условий)
+* & - и (выполнены оба условия)
+* ! - не 
+* : - интервал (a:b - все от a до b)
+
+Переходим к основным функциям dplyr. 
+
+# filter
+
+Допустим, нас интересуют только полеты в летние месяцы
+
+```{r}
+#?filter
+flData = filter(flData, month == 6 | month == 7 | month == 8)
+```
+
+**Внимание!** Т.к. мы сохраняем результат фильтрации в ту же самую переменную `flights`, то дальше мы можем работать уже не с полными данными, а только с полетами в летние месяцы. Если нужно оставить возможность работы с исходными данными, сохраняйте результат в новую переменную.
+
+```{r}
+ggplot(data = flData) + geom_boxplot(aes(x = origin, y = distance))
+```
+
+Теперь отберем только те рейсы, в которых пункт назначения Майами (MIA - Miami International Airport)
+
+```{r}
+flData = filter(flData, dest == "MIA")
+ggplot(data = flData) + geom_bar(aes(x = month, fill = origin), position = "dodge")
+```
+
+# arrange
+
+Упорядочим рейсы по времени вылета
+```{r}
+#?arrange
+flData = arrange(flData, year, month, day)
+head(flData)
+```
+
+И по задержке прилета в убывающем порядке
+```{r}
+flData = arrange(flData, desc(dep_delay))
+head(flData)
+```
+
+# select
+
+Отберем для дальнейшего анализа только данные о номере рейса и задержках, удалим из рассмотрения переменную `arr_time`
+```{r}
+#?select
+str(flData)
+flData = dplyr::select(flData, tailnum, dep_delay:arr_delay)
+flData = dplyr::select(flData, -arr_time)
+str(flData)
+```
+
+#rename
+
+Переименуем переменную `tailnum` для единообразия в `tail_num`
+```{r}
+flData = rename(flData, tail_num = tailnum)
+```
+
+# summarise & mutate
+
+**Ваша очередь:** В чем отличия функций `summarise()` и `mutate()`?
+
+```{r}
+?summarise
+?mutate
+```
+
+```{r}
+flData = mutate(flData, dep_arr_dif = arr_delay - dep_delay)
+summarise(flData, mean_dif = mean(dep_arr_dif))
+```
+
+**Ваша очередь:** Что означает полученное число?
+
+
+# group_by
+
+Если нам нужно значение не для всей выборки, а для каждого из рейсов, то мы сначала группируем по номеру рейса, а затем вычисляем нужную характеристику
+```{r}
+flData = group_by(flData, tail_num)
+tail_dif = dplyr::summarise(flData, median_dif = median(dep_arr_dif))
+tail_dif
+```
+
+# join
+
+Объединение нескольких датасетов в один по одной из переменных
+```{r}
+?join
+```
+
+В чем разница `inner_join()` и `left_join()`?
+
+```{r}
+flData = inner_join(x = flData, y = tail_dif, by = "tail_num")
+str(flData)
+flData = arrange(flData, median_dif)
+flData
+```
+
+# Два основных способа работы с `dplyr`
+
+Вернемся к первоначальному датасету 
+```{r}
+flights = nycflights13::flights
+flights = na.omit(flights)
+```
+
+1. Мы можем выполнять операции пошагово (step-by-step), сохраняя промежуточные результаты
+
+```{r}
+a1 = group_by(flights, year, month, day)
+a2 = select(a1, arr_delay, dep_delay)
+a3 = summarise(a2,
+  arr = mean(arr_delay, na.rm = TRUE),
+  dep = mean(dep_delay, na.rm = TRUE))
+a4 = filter(a3, arr > 30 | dep > 30)
+```
+
+**Ваша очередь:** Какие данные, как вы думаете, остались в `a4`?
+
+2. Либо можем работать с помощью pipes (%>%)
+
+```{r}
+delays = flights %>%
+  group_by(year, month, day) %>%
+  select(arr_delay, dep_delay) %>%
+  summarise(
+    arr = mean(arr_delay, na.rm = TRUE),
+    dep = mean(dep_delay, na.rm = TRUE)
+  ) %>%
+  filter(arr > 30 | dep > 30)
+```
+
+## Ваша очередь
+
+Загрузить базу по колледжам
+
+```{r}
+colleges = ISLR::College
+?ISLR::College
+```
+
+Оставить в базе только вузы с Graduation Rate меньше 50%
+
+```{r eval = F}
+colleges = filter(colleges, ...)
+```
+
+Создать 2 новые колонки. Первая – отношение принятых (одобренных) заявлений на поступление к количеству
+полученных заявлений. Вторая – отношение количества поступивших студентов к количеству принятых заявлений
+
+```{r eval = F}
+colleges = mutate(colleges, ...)
+```
+
+Оставить только две новые колонки, созданные на предыдущем шаге, и колонку, соответствующую типу вуза (является ли вуз частным или государственным).
+
+```{r eval = F}
+colleges = dplyr::select(colleges, ...)
+```
+
+Построить графики для сравнения доли принятых заявлений между типами вузов и сравнения доли поступивших студентов между типами вузов 
+
+```{r eval = F}
+ggplot(data = colleges) + ...
+```
+
+Сгрупировать базу по типу вуза (частный или государственный), посчитать средние значения по оставшимся двум колонкам.
+
+```{r eval = F}
+colleges %>% group_by(...) %>% dplyr::summarize(...)
+```
+
+Загрузите базу заново
+
+```{r}
+colleges = ISLR::College
+```
+
+Постройте график, чтобы сравнить каких колледжей в базе больше, частных или государственных
+
+```{r eval = F}
+ggplot(data = colleges) + ...
+```
+
+Создайте новую колонку, отражающую, приходится ли на одного преподавателя больше 13 студентов или нет
+
+```{r eval = F}
+colleges = mutate(colleges, ...)
+```
+
+Постройте график, отражающий взаимосвязь между типом колледжа и тем, приходится ли в нем на одного преподавателя больше 13 студентов или нет
+
+```{r eval = F}
+ggplot(data = colleges) + ...
+```
+
+Постройте график, отражающий взаимосвязь между затратами на обучение одного студента и количеством поданных заявлений в колледж
+
+```{r eval = F}
+ggplot(data = colleges) + ...
+```
+
+Посчитайте среднее количество fulltime undergraduates и parttime undergraduates в частных и государственных колледжах
+
+```{r eval = F}
+colleges %>% group_by(...) %>% dplyr::summarize(...)
+```
+
+Выберите колледжи, в которых суммарные затраты (personal, books, room) не превышают 6000. Каких колледжей в этой категории больше?
+
+Сформулируйте свой вопрос по рассматриваемой базе. Выполните вычисления / постройте график для ответа на него.

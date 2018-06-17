@@ -1,0 +1,86 @@
+---
+title: 'DS Minor: Lab 01 -- Networks Intro'
+output: html_document
+---
+### "Все связано"
+ - взаимосвязи между людьми (профессиональные, дружеские, семейные,..)
+ - связи между организациями, союзами, странами...
+ - связи между предметами (компьютеры, книги, фильмы...)
+ - связи между понятиями
+ - ...
+ 
+Два основных понятия -- вершины (узлы, vertices, nodes) и связи (дуги, ребра, links, edges). 
+
+* что может являться вершинами и связями в списке выше?
+* приведите свои примеры
+
+Немного примеров
+
+![](https://pp.vk.me/c636527/v636527093/45690/dKu6GEn4jxU.jpg)
+![](https://pp.vk.me/c636527/v636527093/45698/pLr04qRfbJE.jpg)
+![](https://upload.wikimedia.org/wikipedia/commons/4/43/Tripletsnew2012.png)
+
+
+### Зачем изучать сети?
+
+Рассмотрим те же примеры. Зачем нам нужно изучать связи?
+ - взаимосвязи между людьми (профессиональные, дружеские, семейные,..)
+ - связи между организациями, союзами, странами...
+ - связи между предметами (компьютеры, книги, фильмы...)
+
+Подробнее и еще примеры `~/shared/minor2_2016/2-datatech/books/barabasi-book_chapter_1.pdf`
+
+* как вы думаете, анализ сетей (network science) -- это новая область или нет? Почему?
+
+### Формализация сетей -- графы
+
+#### Термины и понятия
+
+* граф (graph)
+* вершина, узел (node)
+* ребро (edge)
+* ориентированные (направленные) / неориентированные графы (directed / undirected graph)
+* список ребер (edgelist)
+* матрица смежности (adjacency matrix)
+
+#### Инструмент
+
+Мы будем работать с пакетом `igraph` для создания и работы с направленными и ненаправленными графами (<http://igraph.org/r/>)
+
+```{r message=FALSE, warning=FALSE}
+library(igraph)
+```
+
+#### Небольшие примеры для обсуждения понятий
+**Граф** -- способ формально описать взаимосвязи между набором элементов (**вершин, nodes**). **Ребро (edge)** -- связь между элементами, представляется как пара вершин (начало-конец)
+
+**Ориентированный граф** -- несимметричная связь, направление важно. **Неориентированный граф** -- симметричная связь (*A* и *B* связаны).
+
+* какие графы являются ориентированными? Неориентированными?
+* сколько вершин в графах? Ребер?
+
+```{r echo = FALSE, fig.height=7}
+# we will discuss the creation of graphs later. At that time just look at the pictures
+par(mar=c(5.1,1,1,1), mfrow = c(2,2))
+plot(make_graph("Bull"), 
+     vertex.color = "lightblue", 
+     vertex.size = 40, 
+     vertex.label.cex = 1.5,
+     xlab = "(A)")
+plot(make_graph("Diamond"), 
+     vertex.color = "lightblue", 
+     vertex.size = 40, 
+     vertex.label.cex = 1.5,
+     xlab = "(B)")
+plot(make_graph(c(1, 2, 2, 3, 3, 4, 5, 6), directed = TRUE), 
+     vertex.color = "lightblue", 
+     vertex.size = 40, 
+     vertex.label.cex = 1.5,
+     xlab = "(C)")
+plot(make_graph(c("A","C", "A","D", "B","D", "E","A", "B","F", "F","A"), directed = TRUE), 
+     vertex.color = "lightblue", 
+     vertex.size = 40, 
+     vertex.label.cex = 1.5,
+     xlab = "(D)")
+```
+

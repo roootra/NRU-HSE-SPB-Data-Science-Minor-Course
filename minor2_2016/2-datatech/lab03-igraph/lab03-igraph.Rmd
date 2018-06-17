@@ -1,0 +1,299 @@
+---
+title: 'DS Minor: Lab 03 -- igraph'
+output: html_document
+---
+
+#### Термины и понятия 
+
+Для повторения
+
+* граф (graph)
+* вершина, узел (node)
+* ребро (edge)
+* ориентированные (направленные) / неориентированные графы (directed / undirected graph)
+* список ребер (edgelist)
+* матрица смежности (adjacency matrix)
+
+#### Инструмент
+
+Мы будем работать с пакетом `igraph` для создания и работы с направленными и ненаправленными графами (<http://igraph.org/r/>)
+
+```{r message=FALSE, warning=FALSE}
+library(igraph)
+```
+
+### Создание графа
+Граф состоит из набора вершин и набора ребер. Один из способов его задания -- определить список ребер **edgelist**, т.е. список пар связанных вершин.
+
+Создадим направленный граф с 4 вершинами и 5 ребрами: 1 to 2, 1 to 3, 3 to 4, 3 to 2, and 2 to 4.
+```{r}
+exampleGr <- make_graph(c(1,2, 1,3, 3,4, 3,2, 2,4), directed = TRUE)
+```
+
+Результат вызова функции `print()` -- описание созданного объекта
+
+```{r}
+exampleGr
+```
+
+Нарисовать граф можно с помощью функции `plot()`:
+
+```{r}
+plot(exampleGr)
+```
+
+Вершины не обязательно должны быть числами, это могут быть любые имена:
+
+```{r}
+exampleGraph <- make_graph(c("M","F", "M","L", "F","L", "E","M", "F","S", "S","M"), directed = F)
+exampleGraph
+plot(exampleGraph)
+V(exampleGraph)
+```
+
+#### Загрузка графа
+
+Мы рассмотрели пример создания графа вручную, но в большинстве случаев мы будем загружать их из файлов некоторого формата. `igraph` позволяет использовать многие форматы файлов. 
+
+##### Список ребер
+
+`graph.data.frame` (или `graph_from_data_frame`) создает граф igraph из таблицы данных (data frame), первые два столбца которого рассматриваются как список ребер (начало - конец), остальные -- как дополнительные свойства ребер.
+
+Рассмотрим искусственную социальную сеть *Krackhardt’s kite*.
+
+```{r}
+edgelist <- read.csv("~/shared/minor2_2016/2-datatech/lab03-igraph/kite.csv")
+head(edgelist)
+
+kite <- graph.data.frame(edgelist, directed = FALSE)
+plot(kite)
+```
+
+
+##### Матрица смежности (Adjacency matrix)
+
+Еще одно представление графа -- **матрица смежности** (adjacency matrix), т.е. матрица |V|x|V|, где |V| -- число вершин, а элемент в i-ой строке и j-ом столбце равен 1, если есть связь между вершиной i и вершиной j, и 0 в противном случае.
+
+Рассмотрим отношения между семьями Флоренции (Renaissance Florentine families collected by John Padgett from historical documents). Связь -- брачные договоры.
+
+```{r}
+adjFlorence <- read.csv("~/shared/minor2_2016/2-datatech/lab03-igraph/florentineFamily.csv")
+rownames(adjFlorence) <- names(adjFlorence)
+
+adjFlorence <- as.matrix.data.frame(adjFlorence)
+```
+
+Матрица смежности
+
+```{r results='asis'}
+pander::pandoc.table(adjFlorence, split.tables = Inf)
+```
+
+
+Создание графа по матрице (`graph.adjacency` или `graph_from_adjacency_matrix`)
+
+```{r}
+florentine <- graph.adjacency(adjmatrix = adjFlorence, mode = "undirected")
+```
+
+Функции `V()` и `E()` выдают список вершин и ребер соответственно.
+
+```{r}
+V(florentine)
+E(florentine)
+```
+
+Для получения числа вершин и ребер в графе можно использовать функции `vcount()` и `ecount()`
+
+```{r}
+vcount(florentine)
+ecount(florentine)
+```
+
+```{r}
+plot(florentine)
+```
+
+#### Другие форматы файлов
+
+`igraph` позволяет читать и файлы других форматов, например, файл *Pajek*. Подробности и другие форматы в `?read.graph()`
+
+```{r}
+karate <- read.graph("~/shared/minor2_2016/2-datatech/lab03-igraph/karate.net", format="pajek")
+plot(karate)
+```
+
+Уже загруженный граф можно посмотреть в любом представлении, например, в виде матрицы.
+
+```{r results='asis'}
+adjKarate <- get.adjacency(karate, sparse = FALSE)
+pander::pandoc.table(adjKarate, split.tables = Inf)
+```
+
+### Рисование графа
+
+В пакете `igraph` много параметров для визуализации графов. Более подробно можно посмотреть в `?igraph.plotting`.
+
+Можно менять цвета, размеры, подписи, фон и т.д., чтобы получить именно тот вид графа, что нужен. Существует два способа определения этих параметров. 
+
+Первый -- указать их в функции `plot`:
+```{r}
+plot(florentine,
+     vertex.color = "lightgreen",
+     vertex.size = 40,
+     vertex.shape = "rectangle",
+     edge.width = 1.5)
+```
+
+Второй способ -- задать нужные значения как свойства вершин или ребер.
+
+```{r}
+V(florentine)$color = "lightblue"
+V(florentine)$size = 7
+V(florentine)$label.dist = 0.9 # labels outside the circles
+E(florentine)$width = 2
+plot(florentine)
+```
+
+Еще один параметр визуализации -- укладка (layout)
+
+```{r}
+plot(florentine, layout = layout.circle)
+plot(florentine, layout = layout.fruchterman.reingold)
+plot(florentine, layout = layout.kamada.kawai, 
+     vertex.color = "orange",              # overrides pre-specified parameters
+     vertex.label.color = "black")
+```
+
+### Меры центральности
+
+Вспомним о различных мерах центральности -- посчитаем, сколько брачных связей связывает семейство Медичи с остальными
+
+```{r}
+degree(florentine, v = "Medici")
+```
+
+Что можно сказать о других семьях?
+
+```{r}
+degree(florentine)
+```
+
+Для более удобного представления мы можем изменить размер вершин таким образом, чтобы он отражал степень вершины 
+
+```{r}
+plot(florentine, vertex.size = degree(florentine)*5)
+```
+
+... или показать это цветом
+
+```{r}
+plot(florentine, 
+     vertex.color = cut(degree(florentine),5),
+     palette = sequential_pal(5),
+     vertex.size = 10)
+```
+
+* Какие выводы можно сделать из данного графа?
+* замените степень на битвинность. Как изменятся выводы?
+
+Рассмотрим другие меры центральности.
+
+#### Центральность по близости
+
+"Быстро достижимые вершины"
+
+Показывает, насколько вершины близки друг к другу. Центральность по близости = число других вершин (n-1), разделенное на сумму расстояний до других вершин. Другими словами, обратное значение к тому, сколько в среднем шагов потребуется, чтобы дойти до любой другой вершины 
+
+```{r}
+closeness(florentine)
+plot(florentine, vertex.size = closeness(florentine)*400, 
+     vertex.label.cex = closeness(florentine)*50)
+```
+
+#### PageRank
+
+"Важны соседи"
+
+Вершина более важна, если она связана с более важными вершинами (eigenvector centrality)
+
+Разрабатывался как инструмент для ранжирования веб-страниц (Google PageRank). Если на странице A есть ссылка на страницу B, это значит, что автор А считает, что источник В полезен. Т.е. ссылка от А добавляет репутацию В, но А тоже бывают разные...
+
+Pagerank вершины =  сумма pageranks соседей, разделенная на количество этих соседей. 
+
+```{r}
+page_rank(florentine)$vector
+
+plot(florentine, vertex.size = page_rank(florentine)$vector*100, 
+     vertex.label.cex = page_rank(florentine)$vector*10)
+```
+
+### Выявление сообществ
+
+Модулярность = разность между долей ребер внутри сообщества и ожидаемой доли связей, если бы ребра были размещены случайно. Является мерой качества разделения на сообщества.
+
+#### Fast-Greedy
+
+Иерархический подход. Первоначально каждая вершина представляет собой отдельное сообщество. Сообщества объединяются таким образом, чтобы это привело к наибольшему возрастанию модулярности. Останавливаемся, когда нет следующего шага, увеличивающего модулярность. 
+
+```{r}
+fgcommune <- fastgreedy.community(florentine)
+membership(fgcommune) ## assigning nodes to communities
+modularity(fgcommune)
+plot(fgcommune, florentine)
+```
+
+График без затененных областей
+
+```{r}
+plot(florentine, vertex.color = membership(fgcommune))
+```
+
+Дендрограмма
+
+```{r}
+dendPlot(fgcommune)
+```
+
+#### Walktrap
+
+Подход, основанный на случайных путях. Основная идея -- если случайно "блуждать" по графу, то больше шансов, что ваш путь будет чаще оставаться внутри сообщества и только иногда выходить за его пределы. 
+
+```{r}
+wtcommune <- walktrap.community(florentine)
+membership(wtcommune) ## assigning nodes to communities
+modularity(wtcommune)
+plot(wtcommune, florentine)
+```
+
+
+Другие алгоритмы в `igraph`
+
+* label.propagation.community 
+* leading.eigenvector.community 
+* multilevel.community 
+* optimal.community
+* spinglass.community 
+* infomap.community
+
+### Ваша очередь
+
+Исследуйте другую часть данных про семьи Флоренции -- теперь с финансовыми связями.
+
+```{r}
+adjFlorenceFinance <- read.csv("~/shared/minor2_2016/2-datatech/lab03-igraph/florentineFamilyFinance.csv")
+rownames(adjFlorenceFinance) <- names(adjFlorenceFinance)
+
+adjFlorenceFinance <- as.matrix.data.frame(adjFlorenceFinance)
+```
+
+
+```{r results='asis'}
+pander::pandoc.table(adjFlorenceFinance, split.tables = Inf)
+```
+
+* Матрица соответствует направленному или ненаправленному графу?
+* Создайте граф, нарисуйте его 
+* Измените какой-либо графический параметр (цвет, размер, форму,...) 
+* Сравните разные меры центральности. Какие выводы можно сделать?
+* Сравните разные алгоритмы выделения сообществ. Какие выводы можно сделать?

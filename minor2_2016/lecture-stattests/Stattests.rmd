@@ -1,0 +1,386 @@
+---
+title: "Статистические тесты"
+date: "22/11/2016"
+output: ioslides_presentation
+---
+
+## Задача
+
+* Хотим понять, отличаются ли группы по какому-то показателю
+
+    * действительно ли мужчины чаще становятся руководителями, чем женщины
+    * действительно ли определенная диета оказывает влияние на здоровье
+    * действительно ли есть разница в уровне дохода между теми, у кого есть ученая степень, и теми, у кого ее нет
+    * действительно ли оценка по математике связана с типом темперамента студента
+    * ...
+
+```{r echo = F, message=F, warning=F}
+library(ggplot2)
+library(dplyr)
+```
+
+## Данные
+
+Oценки по математике и социологии для экономистов и социологов (+ перцентиль в соответствующем рейтинге, нормированная оценка, специальность и запись на майнор)
+
+```{r, results='asis', echo = F, message=F, warning=F}
+rates <- read.csv("~/materials/minor/sciprog/lab07/rates.csv")
+pander::pandoc.table(head(rates, n = 3))
+```
+
+
+## Сравним оценки: социология
+
+```{r echo = F, message=F, warning=F}
+ggplot(rates) +
+  geom_boxplot(aes(x=Major, y=Soc))
+
+```
+
+## Сравним оценки: математика
+
+```{r echo = F, message=F, warning=F}
+ggplot(rates) +
+  geom_boxplot(aes(x=Major, y=Math))
+
+```
+
+## Сравним оценки: социология и майнор
+
+```{r echo = F, message=F, warning=F}
+ggplot(rates) +
+  geom_boxplot(aes(x=DS_minor, y=Soc))
+
+```
+
+## Сравним оценки: математика
+
+```{r echo = F, message=F, warning=F}
+ggplot(rates) +
+  geom_boxplot(aes(x=Major, y=Soc))
+
+Soc.observed <- mean(rates$Soc[rates$Major=="Соц"]) 
+Econ.observed <- mean(rates$Soc[rates$Major=="Экон"])
+diff.observed <- Soc.observed - Econ.observed
+```
+
+Разница между средними: `r diff.observed`
+
+## Интерпретация
+
+Итак, разница между средними = `r diff.observed`
+
+* Велика ли эта разница?
+* Есть какая-то закономерность, приводящая к разнице оценок, или это всего лишь случайность?
+
+## Гипотезы 
+
+* Формулируем гипотезу (нуль-гипотезу)
+* Проверяем, верна ли она (по тем данным, что у нас есть)
+
+**При тестировании мы предполагаем, что нуль-гипотеза истинна.**
+
+Хорошая цитата из википедии на английском...
+
+- "This is often expressed in the phrase **innocent until proven guilty**, coined by the English lawyer Sir William Garrow. Garrow insisted that accusers be *robustly tested in court*. An objective observer in the position of the juror must **reasonably conclude that the defendant almost certainly committed the crime**." (Wikipedia)
+
+## Проверка гипотезы 
+
+1. Сформулируем наш вопрос на языке статистики (то есть определим $H_0$ и $H_A$)
+    - Например: $H_0:$ Средняя оценка по социологии одинаковая для экономистов и социологов; $H_A:$ Средние оценки различаются.
+2. Выберем уровень значимости ($\alpha$ -- допустимая вероятность **ошибочно** отклонить **истинную** $H_0$)
+3. Определим подходящую к нашим данным статистику и вычислим ее.
+4. Проверим, достаточно ли у нас оснований отклонить нулевую гипотезу (для выбранного значения $\alpha$)
+5. Сформулируем наши выводы на "человеческом" языке.
+
+
+## Традиционный способ: t-критерий
+
+```{r echo=F}
+t.test(Soc~Major, rates)
+```
+
+- Что такое t-статистика?
+- Почему она работает и почему именно ее мы использовали?
+- Есть ли какие-то дополнительные условия, которые мы должны проверить?
+
+## Random Permutation Test
+
+**При тестировании мы предполагаем, что нуль-гипотеза истинна.**
+
+* предполагаем, что в среднем разницы нет
+* тогда если мы перемешаем наши оценки и раздадим их случайно, то особо ничего измениться не должно.
+
+Давайте случайно перемешивать оценки и записывать разницу между средней оценкой социологов и средней оценкой экономистов.
+
+  * перемешали -> посчитали среднее по группе -> нашли разницы между группами -> записали значение
+  * повторили много раз
+
+```{r echo = F, message=F, warning=F}
+number_of_permutations <- 5000
+
+count_diff <- function(number_of_permutations = 1000) {
+  diff.random <- rep(NA_real_, number_of_permutations)
+  for (i in 1 : number_of_permutations) {
+
+  ## перемешиваем оценки
+	shuffled = sample(rates$Soc, length(rates$Soc))
+	
+	Soc.random = shuffled[rates$Major == "Соц"]
+	Econ.random = shuffled[rates$Major == "Экон"]
+
+	## Вычисляем разность средних
+	diff.random[i] = mean(Soc.random) - mean(Econ.random)
+  }
+  diff.random 
+}
+```
+
+## Разница между средними
+
+```{r, echo=FALSE, message=FALSE}
+diff.random <- count_diff(number_of_permutations)
+
+df <- data.frame(diff.random = diff.random)
+g <-
+  ggplot(df) +
+  geom_histogram(aes(diff.random), fill="steelblue")
+g
+```
+
+## Разница между средними
+
+```{r, echo=FALSE, message=FALSE}
+g <- g + geom_vline(xintercept=diff.observed, color="black")
+g
+
+```
+
+## 5% критическая область
+
+```{r echo=FALSE, message=FALSE}
+q <- quantile(diff.random, c(0.025, 0.975))
+```
+
+```{r, echo=FALSE, message=FALSE}
+g <- g +
+  geom_vline(xintercept=q[1], color="red") +
+  geom_vline(xintercept=q[2], color="red")
+g
+```
+
+
+## P-values и всякое
+
+**P-value** это вероятность получить такой же результат, как есть в данных, или еще больший, **при условии, что верна нуль-гипотеза**.
+
+В нашем случае посчитать примерное значение p-value очень просто, это доля случаев с большей разницей, чем была в наблюдении. Посчитаем количество перестановок у которых разность была больше и поделим на общее число экспериментов.
+
+```{r echo=FALSE, message=FALSE}
+
+pvalue <- function(diff.random, diff.observed, number_of_permutations){
+    pvalue = sum(abs(diff.random) >= abs(diff.observed)) / number_of_permutations
+    (pvalue) 
+}
+
+pvalue(diff.random, diff.observed, number_of_permutations)
+
+```
+
+## Еще один пример
+
+Сравним пришедших и не пришедших на майнор, с точки зрения оценки по социологии.
+
+```{r echo=FALSE, message=FALSE}
+ggplot(rates) +
+  geom_boxplot(aes(x=DS_minor, y=Soc))
+
+```
+
+## Еще один пример
+
+```{r echo=FALSE, message=FALSE}
+DS.observed <- mean(rates$Soc[rates$DS_minor]) 
+NoDS.observed <- mean(rates$Soc[!rates$DS_minor])
+diff.observed <- DS.observed - NoDS.observed
+
+number_of_permutations <- 5000
+
+count_diff <- function(number_of_permutations = 1000) {
+  diff.random <- rep(NA_real_, number_of_permutations)
+  for (i in 1 : number_of_permutations) {
+
+  ## перемешиваем оценки, тепере это abs.
+	shuffled = sample(rates$Soc, length(rates$Soc))
+	
+	DS.random = shuffled[rates$DS_minor]
+	NoDS.random = shuffled[!rates$DS_minor]
+
+	## Вычисляем разность средних
+	diff.random[i] = mean(DS.random) - mean(NoDS.random)
+  }
+  diff.random 
+}
+
+diff.random <- count_diff(number_of_permutations)
+
+df <- data.frame(diff.random = diff.random)
+g <-
+  ggplot(df) +
+  geom_histogram(aes(diff.random), fill="steelblue")+
+  geom_vline(xintercept=diff.observed, color="black")
+
+q <- quantile(diff.random, c(0.025, 0.975))
+g <- g +
+  geom_vline(xintercept=q[1], color="red") +
+  geom_vline(xintercept=q[2], color="red")
+g
+```
+
+
+## Разные полезности
+
+* Сравните результаты t-теста и теста перестановок
+* [Krzywinski, M., Altman, N., 2013. Points of significance: Significance, P values and t-tests. Nat Meth 10, 1041–1042. doi:10.1038/nmeth.2698](http://www.nature.com/nmeth/journal/v10/n11/full/nmeth.2698.html) 
+
+
+
+## Reading (Watching|Playing) List
+
+* https://www.youtube.com/watch?v=5Dnw46eC-0o
+* http://spark.rstudio.com/ahmed/permutation/
+* http://www.nature.com/nmeth/journal/v10/n11/full/nmeth.2698.html
+* http://www.burns-stat.com/documents/tutorials/the-statistical-bootstrap-and-other-resampling-methods-2/#permtest
+* http://cran.r-project.org/web/packages/coin/vignettes/coin_implementation.pdf
+
+## Возвращаясь к t-критерию
+
+* перемешивать/пересчитывать много раз -- это не совсем удобно
+* придумали более короткий вычислительно способ
+* но нужно соблюдать предположения
+    * только сравнение средних
+    * выборка случайна и независима
+    * значения распределены нормально
+    
+## t-критерий
+
+```{r echo=F}
+t <- t.test(abs~Major, rates)
+t
+```
+
+## t-критерий
+
+```{r echo=F}
+x <- seq(from = -5, to = 10, by = 0.1)
+gr <- ggplot() + geom_line(aes(x = x, y = dt(x, df = dim(rates)[1])), color = "blue")
+gr <- gr + geom_vline(xintercept=t$statistic, color="black")
+gr <- gr +
+  geom_vline(xintercept=qt(0.025, df = dim(rates)[1]), color="red") +
+  geom_vline(xintercept=qt(1-0.025, df = dim(rates)[1]), color="red")
+gr + xlab("t-statistics") + ylab("Probability")
+```
+
+## Задача
+
+* Хотим понять, отличаются ли группы по какому-то показателю
+* Что делать, если среднее посчитать нельзя?
+     * в каких случаях так происходит? Примеры?
+     
+## Категориальные переменные? 
+
+* Пол
+* Национальность
+* Семейный статус
+* Религия
+* ...
+
+## Гипотеза
+
+- Хотим проверить, есть ли взаимосвязь между двумя категориальнымии переменными
+- Нуль-гипотеза: взаимосвязи нет
+- Альтернативная гипотеза: ?
+
+## Гипотеза
+
+- Хотим проверить, есть ли взаимосвязь между двумя категориальнымии переменными
+- Нуль-гипотеза: взаимосвязи нет
+- Альтернативная гипотеза: взаимосвязь есть
+
+## Хи-квадрат: основная идея
+
+Сравним **частоты**, наблюдаемые в каждой категории, и те **частоты**, что можно было бы ожидать, если бы распределение по категориям былло случайно 
+
+$$\chi^2 = \sum \frac{(observed_{ij}-model_{ij})^2}{model_{ij}}$$
+
+где *i* -- строка в таблице сопряженности, а *j* -- столбец
+
+## Пример
+
+```{r, echo=FALSE, warning=FALSE}
+library(pander)
+cats <- matrix(c(28, 10, 38, 48, 114, 162, 76, 124, 200), nrow=3, ncol=3)
+colnames(cats) <- c("Food", "Affection", "Total")
+rownames(cats) <- c("Yes", "No", "Total")
+cats <- as.data.frame(cats)
+```
+
+```{r, results='asis', echo=FALSE}
+pander::pandoc.table(cats)
+```
+
+## Ожидаемые значения
+
+$$Model_{ij} = E_{ij} = \frac{\text{row total}_i * \text{column total}_j}{n}$$
+
+$$Model_{Food,Yes} = \frac{RT_{Yes} * CT_{Food}}{n} = \frac{76 * 38}{200} = 14.44$$
+
+$$Model_{Food,No} = \frac{RT_{No} * CT_{Food}}{n} = \frac{124 * 38}{200} = 23.56$$
+
+$$Model_{Affection,Yes} = \frac{RT_{Yes} * CT_{Affection}}{n} = \frac{76 * 162}{200} = 61.56$$
+
+$$Model_{Affection, No} = \frac{RT_{No} * CT_{Affection}}{n} = \frac{124 * 162}{200} = 100.44$$
+
+## Считаем на примере
+
+$$\chi^2 = \frac{(28-14.44)^2}{14.44} + \frac{(10-23.56)^2}{23.56} + \frac{(48-61.56)^2}{61.56} + \\ \frac{(114-100.44)^2}{100.44} = 25.35$$
+
+P-value = `r pchisq(25.35, df = 200)`
+
+## Отклонения от ожидаемого
+```{r message =F, echo=FALSE, warning=F}
+library(vcd)
+assoc(matrix(c(28, 10, 48, 114), nrow=2, ncol=2), gp=shading_max, rot_labels = c(0, 0, 0, 0), rot_varnames = c(0, 0, 0, 0))
+```
+
+## Вернемся к студентам и оценкам
+
+```{r, results='asis', echo=FALSE}
+pander::pandoc.table(table(rates$Major, rates$DS_minor))
+```
+```{r, message =F, echo=FALSE, warning=F}
+ch <- chisq.test(rates$Major, rates$DS_minor)
+ch
+```
+
+## Тест Хи-квадрат
+
+Наблюдаемое:
+```{r, results='asis', echo=FALSE}
+pander::pandoc.table(ch$observed)
+```
+
+Ожидаемое:
+```{r, results='asis', echo=FALSE}
+pander::pandoc.table(ch$expected)
+```
+
+## Таблица Пирсоновских остатков 
+```{r, results='asis', echo = F}
+pander::pandoc.table(ch$residuals)
+```
+
+## Отклонения от ожидаемого
+```{r message =F, echo=FALSE, warning=F}
+assoc(table(rates$Major, rates$DS_minor), gp=shading_max, rot_labels = c(0, 0, 0, 0), rot_varnames = c(0, 0, 0, 0))
+```

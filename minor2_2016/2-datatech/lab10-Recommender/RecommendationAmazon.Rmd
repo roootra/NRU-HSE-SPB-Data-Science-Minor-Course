@@ -1,0 +1,263 @@
+---
+title: "Recommendation System"
+author: "Alena Suvorova"
+date: "22 05 2017"
+output: html_document
+---
+
+Сегодня мы рассмотрим пример построения небольшой рекомендательной системы в R. Используем пакет  `recommenderlab` <https://cran.r-project.org/web/packages/recommenderlab/vignettes/recommenderlab.pdf>
+
+
+###Загрузка данных
+
+Работаем с данными Amazon о фильмах
+
+```{r message = FALSE}
+library(jsonlite)
+library(stringr)
+library(dplyr)
+library(readr)
+```
+
+Чтение и преобразование данных (см. предыдущую лабораторную)
+
+```{r}
+j = read_lines("~/shared/minor2_2016/data/amazon/reviews_Movies_and_TV_5_sub48.json") %>% 
+  str_c(collapse = ",") %>%  
+  (function(str) str_c("[", str, "]")) %>% 
+  fromJSON(simplifyDataFrame = T)
+
+jmeta = readLines("~/shared/minor2_2016/data/amazon/meta_Movies_and_TV_5_sub48.json") %>% 
+  str_c(collapse = ",") %>%  
+  (function(str) str_c("[", str, "]")) %>% 
+  fromJSON(simplifyDataFrame = T)
+```
+
+Возьмем из мета-информации только заголовки, цену и описание и уберем комментарии в скобках в заголовках
+
+```{r}
+jmeta = select(jmeta, title, asin, price, description)
+jmeta$title = str_replace_all(jmeta$title, "\\(.*\\)", "")
+jmeta$title = str_replace_all(jmeta$title, "\\[.*\\]", "")
+```
+
+### Оценки фильмов пользователями
+
+Сохраним только оценки пользователей и фильмы
+
+```{r}
+rates = select(j, reviewerID, asin, overall)
+```
+
+Преобразуем к таблице в "широком" формате
+
+```{r}
+library(tidyr)
+rates = spread(rates, key = asin, value = overall)
+```
+
+Для дальнейшей работы в данных должны остаться только оценки, поэтому переведим сначала пользователей в имена строк 
+
+```{r}
+rownames(rates) = rates$reviewerID
+rates = select(rates, -reviewerID)
+```
+
+Начинаем работать с пакетом `recommenderlab`
+
+```{r message=FALSE, warning=FALSE}
+library(recommenderlab)
+```
+
+Преобразуем данные с оценками в тот формат, который "понимает" этот пакет. Таких форматов несколько, нас интересует тот, где используются численные оценки (не бинарные, а с большим числом значений) -- realRatingMatrix
+
+```{r}
+rates = as.matrix(rates)
+r = as(rates, "realRatingMatrix")
+r
+```
+
+Каждая строчка соответствует пользователю, столбец -- фильму, на пересечении -- оценки. Однако в полной матрице 376*500 было бы слишком много пропущенных значений (каждый пользователь оценивает существенно меньше фильмов, чем есть в датасете). Поэтому используется более компактный способ хранения.
+
+*Обратите внимание* -- датасет хранится в объекте класса realRatingMatrix, а не data.frame или matrix. Поэтому есть особенности работы с такими данными, например, ряд специальных функций именно для рекомендательных систем.
+
+```{r}
+rowMeans(r)
+```
+
+### Похожесть по оценкам
+
+Похожесть (similarity) может определяться разными способами
+
+* Коэффициент Пирсона;
+* Косинусное расстояние;
+* Евклидово расстояние.
+
+Рассмотрим, например, похожесть первых 10 пользователей
+
+```{r}
+similarity_users10 <- similarity(r[1:50, ], method = "cosine", which = "user")
+as.matrix(similarity_users10)
+```
+
+Или в виде графика (heatmap)
+
+```{r}
+image(as.matrix(similarity_users10), main = "User similarity")
+```
+
+Таким же образом можно посчитать и схожесть между фильмами
+
+### Предварительная подготовка данных
+
+Сначала подготовим данные, в частности, уберем те, что являются нерелевантными. 
+
+Если фильм редкий, его мало кто видел, то оценки для него могут быть сильно смещенными. Так же и для пользователя -- если он оценил малое число фильмов, то ему сложно дать рекомендацию. 
+
+Как определить, что является "малым числом"? В общем случае -- итерационно, т.е. отбираем данные, строим модель, оцениваем ее и так несколько раз. В данном примере рассмотрим только один шаг -- будем считать, что нас интересуют фильмы с не менее 10 оценками и пользователи, поставившие не менее 5 оценок.
+
+Количество оценок у фильма можно посчитать с помощью функции colCounts(), а количество оценок, поставленных одним пользователем -- с помощью rowCounts(). 
+
+```{r}
+library(ggplot2)
+ggplot(data = data.frame(filmRate=colCounts(r))) + geom_histogram(aes(x=filmRate))
+
+ggplot(data = data.frame(userRate=rowCounts(r))) + geom_histogram(aes(x=userRate))
+```
+
+Отберем только строки и столбцы с нужным количеством оценок
+
+```{r}
+ratings_movies <- r[rowCounts(r) > 5, colCounts(r) > 10] 
+ratings_movies
+```
+
+Рассмотрим распределение средних оценок пользователя
+
+```{r}
+average_ratings_per_user <- rowMeans(ratings_movies)
+ggplot()+geom_histogram(aes(x=average_ratings_per_user)) +
+ggtitle("Распределение средних оценок пользователей")
+```
+
+### Метод коллаборативной фильтрации
+
+* вычислить похожесть всех пар фильмов
+* для каждого фильма найти k наиболее похожих
+* для каждого пользователя определить фильмы, наиболее близкие к тем, которые он оценил
+
+Разделим данные на тестовую и обучающую выборки. На обучающей построим модель, для пользователей из тестовой будем рекомендовать фильмы.
+
+```{r}
+set.seed(100)
+test_ind <- sample(1:nrow(ratings_movies), size = nrow(ratings_movies)*0.2)
+recc_data_train <- ratings_movies[-test_ind, ]
+recc_data_test <- ratings_movies[test_ind, ]
+```
+
+Возможны разные методы построения модели. Рассмотрим метод IBCF ("Recommender based on item-based collaborative filtering (real data).")
+
+Построим рекомендательную модель
+```{r}
+recc_model <- Recommender(data = recc_data_train, method = "IBCF", parameter = list(k = 30))
+recc_model
+```
+
+Детали этой модели можно получить с помощью метода getModel(), например, матрицу схожести
+
+```{r}
+model_details <- getModel(recc_model)
+model_details$description
+model_details$sim[1:5, 1:5]
+```
+
+Рекомендации
+
+* для каждого пользователя извлекаются те фильмы, которые он оценил
+* для каждого из фильмов находятся похожие фильмы
+* затем фильмы упорядочиваются согласно весам, где вес каждой рекомендации (фильма) вычисляется на основе оценок пользователя и показателей схожести фильмов (взвешенная сумма)
+
+```{r}
+recc_predicted <- predict(object = recc_model, newdata = recc_data_test, n = 6)
+recc_predicted
+```
+
+Посмотрим на результат
+```{r}
+str(recc_predicted)
+```
+
+Слоты (доступ через символ @) 
+
+* items -- содержит индексы рекомендованных фильмов для каждого пользователя
+* itemLabels -- названия фильмов
+* ratings -- рейтинги рекомендаций
+* n -- число рекомендаций
+
+Рекомендации для первого пользователя
+```{r}
+recc_user_1 <- recc_predicted@items[[15]]
+recc_user_1
+```
+
+Это результат в виде номер строк в матрице, вытащим id фильмов
+
+```{r}
+movies_user_1 <- recc_predicted@itemLabels[recc_user_1]
+movies_user_1
+```
+
+А теперь посмотрим на названия. Функция `match` возвращает позицию, на которой элементы из первого параметра встретились во втором (см. `?match`)
+
+```{r}
+names_movies_user_1 <- jmeta$title[match(movies_user_1, jmeta$asin)]
+names_movies_user_1
+```
+
+### Схожесть не только по оценкам
+
+Введем интересующие нас показатели по фильмам. Например,
+
+* количество отзывов
+* средняя оценка
+
+```{r}
+counts = j %>% group_by(asin) %>% summarize(reviews = n(), average = mean(overall))
+```
+
+* цена
+* длина описания
+
+```{r}
+data = left_join(counts, jmeta, by = "asin")
+data = as.data.frame(data)
+data$length = str_length(data$description)
+rownames(data) = data$title
+data = select(data, -description, -title, -asin)
+data = as.matrix(data)
+```
+
+Найдем схожесть по косинусному расстоянию
+
+```{r}
+library(lsa)
+cosine(data[1:3,])
+cosine(t(data[1:3,]))
+dist = cosine(t(data))
+data[is.na(data)] = 0
+dist = cosine(t(data))
+tail(sort(dist["The Phantom of the Opera ",]))
+
+```
+
+
+**Ваша очередь:** 
+
+1. Постройте рекомендательную систему на основе схожести между пользователями, а не между фильмами (метод UBCF вместо IBCF).
+2. Придумайте свои характеристики фильмов или пользователей и сравните. 
+
+
+
+
+
+

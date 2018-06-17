@@ -1,0 +1,233 @@
+---
+title: "Introduction to Topic Modelling"
+author: "Alena Suvorova"
+date: "25 04 2017"
+output: html_document
+---
+
+### Тематическое моделирование
+
+Имеется коллекция документов. Хотим обнаружить «темы», из которых она сформирована.
+
+LDA (Latent Dirichlet Allocation):
+
+* Каждый документ представляет собой смесь тем.
+* «Тема» — набор слов, которые могут с разными вероятностями употребляться при обсуждении данной темы.
+
+Соответственно, у каждого документа в коллекции — свое распределение тем (в одном документе представлены только некоторые темы коллекции).
+
+![](http://journalofdigitalhumanities.org/wp-content/uploads/2013/02/blei_lda_illustration.png)
+
+Больше информации о тематическом моделировании:
+
+* [Topic modelling in Text Mining with R](http://tidytextmining.com/topicmodeling.html)
+* [topicmodels package](https://cran.r-project.org/web/packages/topicmodels/vignettes/topicmodels.pdf)
+
+
+###Загрузка данных
+
+Работаем с данными Amazon о фильмах
+
+```{r message = FALSE}
+library(jsonlite)
+library(stringr)
+library(dplyr)
+```
+
+Чтение и преобразование данных
+
+```{r}
+j = readLines("~/shared/minor2_2016/data/amazon/reviews_Movies_and_TV_5_sub48.json") %>% 
+  str_c(collapse = ",") %>%  
+  (function(str) str_c("[", str, "]")) %>% 
+  fromJSON(simplifyDataFrame = T)
+
+jmeta = readLines("~/shared/minor2_2016/data/amazon/meta_Movies_and_TV_5_sub48.json") %>% 
+  str_c(collapse = ",") %>%  
+  (function(str) str_c("[", str, "]")) %>% 
+  fromJSON(simplifyDataFrame = T)
+```
+
+Возьмем из мета-информации только заголовки и уберем комментарии в скобках
+
+```{r}
+jmeta = select(jmeta, title, asin)
+jmeta$title = str_replace_all(jmeta$title, "\\(.*\\)", "")
+jmeta$title = str_replace_all(jmeta$title, "\\[.*\\]", "")
+```
+
+Присоединим заголовки к основному датасету
+
+```{r}
+j = left_join(j, jmeta, by = "asin")
+```
+
+Удалим не нужные сегодня переменные
+
+```{r}
+j = select(j, asin, reviewText, overall, title)
+```
+
+Посчитаем, сколько отзывов написано на каждый из фильмов в нашей выборке. Оставим только те фильмы, где есть 35+ отзывов
+
+```{r}
+counts = j %>% group_by(asin) %>% summarize(n = n()) %>% arrange(-n)
+counts
+j = inner_join(j, counts, by = "asin") %>% filter(n >=35)
+```
+
+Посмотрим, что это за фильмы
+
+```{r}
+unique(select(j, title, n))
+```
+
+### Работа с текстом
+
+Начинаем работать с текстом: удаляем цифры, пунктуацию, разбиваем на слова, удаляем стоп-слова, считаем частоты слов в тексте
+
+```{r message = FALSE}
+library(quanteda)
+docs = corpus(j$reviewText)
+
+textdfm = quanteda::dfm(docs, what="word",
+              tolower = TRUE, 
+              removeNumbers = TRUE, removePunct = TRUE,
+              remove = c(stopwords(kind = "english"), "film", "movie")) 
+
+# textdfm = quanteda::dfm(docs, what="word",
+#               toLower = TRUE, 
+#               removeNumbers = TRUE, removePunct = TRUE,
+#               ignoredFeatures = c(stopwords(kind = "english"), "film", "movie"))
+
+dfmforTopics = convert(textdfm, to = "topicmodels")
+```
+
+### Построение модели
+
+Построим модель с двумя темами
+
+```{r message = FALSE}
+library(topicmodels)
+review2_lda <- LDA(dfmforTopics, k = 2, control = list(seed = 12345))
+review2_lda
+```
+
+### Тема как смесь слов
+
+Посмотрим на самые популярные слова в каждой теме. Для этого нам нужно сначала получить вероятности того, что слово относится к той или иной теме (per-topic-per-word probabilities), обозначаемые $\beta$ (*beta*)
+
+```{r message = FALSE}
+library(tidytext)
+amazon2_topics <- tidy(review2_lda, matrix = "beta")
+amazon2_topics
+```
+
+Посмотрим на популярные слова в каждой теме
+
+```{r message = FALSE}
+library(ggplot2)
+
+amazon2_top_terms <- amazon2_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+amazon2_top_terms %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
+К сожалению, по такому набору сложно сказать, чем темы отличаются друг от друга, есть слова, которые встречаются в каждой из тем. Для сравнения тем между собой можно вычислять, насколько встречаемость слов различна между темами. Для этого используют логарифм отношения вероятностей $log_{2}(\beta_{1}/\beta_{2})$ (если $\beta_{1}$ в два раза больше, то это значение равно 1, если наоборот, то -1).
+
+```{r message = FALSE}
+library(tidyr)
+
+beta_spread <- amazon2_topics %>%
+  mutate(topic = paste0("topic", topic)) %>%
+  spread(topic, beta) %>%
+  filter(topic1 > .001 | topic2 > .001) %>%
+  mutate(log_ratio = log2(topic1 / topic2)) %>%
+  arrange(-log_ratio)
+
+head(beta_spread)
+
+```
+
+Визуализируем. Что можно сказать про эти темы?
+
+```{r}
+dataDiff = rbind(head(beta_spread, 7), tail(beta_spread,7))
+
+dataDiff %>%
+  mutate(term = reorder(term, log_ratio)) %>%
+  ggplot(aes(x = term, y = log_ratio)) + 
+  geom_col() +
+  coord_flip()
+```
+
+### Документы как смесь тем
+
+Посмотрим, как темы распределяются по отзывам. Получим вероятности того, что документ относится к той или иной теме (per-document-per-topic probabilities), обозначаемые $\gamma$ (*gamma*)
+
+```{r}
+amazon2_documents <- tidy(review2_lda, matrix = "gamma")
+amazon2_documents
+```
+
+text1, text2, ... -- это отзывы в том порядке, в каком они были при создании матрицы частот. Т.к. мы в первоначальном датасете с тех пор ничего не меняли, то для удобства и сопоставления добавим еще один столбец и объединим
+
+```{r}
+j$document = paste0("text", rownames(j))
+amazon2_documents  = left_join(amazon2_documents, j, by = "document")
+```
+
+Например, отзыв 400
+
+```{r}
+filter(amazon2_documents, document == "text400") %>% select(title, document, topic, gamma) 
+
+```
+
+Распределение отзывов по темам
+
+```{r}
+ggplot(data = amazon2_documents, aes(x = factor(topic), y = gamma)) +
+  geom_boxplot() +
+  facet_wrap(~ title)
+```
+
+
+**Ваша очередь:** 
+
+Скорее всего  для такого разнообразия текстов двух тем мало. Попробуйте выделить 5-7 тем. Как происходит разделение в этом случае?
+
+```{r}
+review5_lda <- LDA(dfmforTopics, k = 5, control = list(seed = 1234))
+
+amazon5_topics <- tidy(review5_lda, matrix = "beta")
+
+amazon5_top_terms <- amazon5_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+amazon5_top_terms %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
+
+
+
+
+
+

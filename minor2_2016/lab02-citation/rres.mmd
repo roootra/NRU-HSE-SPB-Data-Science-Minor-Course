@@ -1,0 +1,18 @@
+ graph LR
+         subgraph Science
+         s[Science Stuff]-->RQ
+          RQ-->Data
+         end
+         subgraph Computation
+         Analysis-->C[Comp.Results]
+         C-->T[Tables]
+         C-->F[Figures]
+         C-->N[Numbers]
+         end
+         subgraph Result
+         A[Paper]
+         end
+         Data-->Analysis
+         T-->A
+          F-->A
+          N-->A

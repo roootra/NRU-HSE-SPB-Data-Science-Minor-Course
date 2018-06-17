@@ -1,0 +1,159 @@
+---
+title: "Lab 11. Деревья решений. Еще немного про деревья"
+output: html_document
+---
+Поговорим еще раз про деревья
+
+Загрузим опять данные про Dota 2
+
+```{r}
+library(partykit)
+load("/principal/courses/minor2_2016/lab10-tree2/autographs.rda")
+```
+
+
+Описание переменных
+
+* Quantity - количество копий автографа на рынке.
+* Price - цена за автограф
+* Role - роль в команде.
+* Country - страна происхождения / национальность
+* Last_participation_year - последний год участия на турнире The International
+* Best_result_ti - лучший результат на турнире The International за все годы
+* Place_num_recent - Место на The International 2015. 0000 - означает место на квалификациях, 00 - означает место на wild card.
+* Is_2015 - принимал ли участие на The International 2015 или нет.
+* Freq - сколько раз принимал участие на турнире The International.
+* Sm_participant - является ли участником Shanghai Major.
+* Games_overall - всего профессиональных игр
+* Winrate_overall - процент побед за все игры.
+* Kda_overall - KDA-статистика за все игры. Kda рассчитывается по формуле: Kills+Assists / Deaths, что означает в скольких убийствах поучаствовал игрок в пересчете на каждую свою смерть.
+* Follows - количество подписчиков в твитере
+* Interview_quantity - количество интервью в целом.
+    * Community - интервью, взятые представителями фан сообщества (с форумов или реддита).
+    * Dota - интервью, взятые для сайтов о доте.
+    * Site_games - интервью для сайтов об играх в целом.
+    * Not_games - интервью для сайтов, не связанных с играми (зачастую национальные СМИ).
+    * Teams - интервью для сайтов профессиональных команд.
+    * Tournament - интервью, взятые по ходу турнира, специальной командой, его освещающей.
+* Sum_top3_places_of_team - Сумма мест от третьего и выше, занятых командой.
+
+Прошлый раз мы строили модель для предсказания цены автографа на всех данных. 
+
+```{r setup,fig.width=11}
+trFull<-ctree(log(price)~.,data=autographs_model)
+plot(trFull, gp = gpar(fontsize = 8),     # font size changed to 6
+      inner_panel=node_inner,
+      ip_args=list(
+        abbreviate = F, 
+        id = FALSE,
+        pval=F)
+ )
+```
+
+Но ранее мы говорили о том, что лучше часть данных использовать для проверки. Почему?
+
+Часть, оставленная для проверки, называется **тестовой (test) выборкой**. А основная, т.е. данные без этой части, на которых мы строим дерево -- **обучающая (train) выборка**
+
+Разделим выборку. 
+
+Сначала посчитаем, сколько строк составят 20% от данных
+```{r}
+test_size = dim(autographs_model)[1]*0.20
+test_size
+```
+
+Теперь отберем `r test_size` номеров строк случайным образом
+```{r}
+set.seed(1238)
+test_indices = sample(1:dim(autographs_model)[1], test_size)
+head(test_indices, 20)
+```
+
+Затем в качестве тестовой выборки возьмем те строки, номера которых "выпали"
+
+```{r}
+test_data = autographs_model[test_indices,]
+```
+
+А в качестве обучающей --  все, кроме них
+
+```{r}
+train_data = autographs_model[-test_indices,]
+```
+
+А теперь построим модель на обучающей выборке
+
+```{r fig.width=11}
+trNew<-ctree(log(price)~.,data=train_data)
+plot(trNew, gp = gpar(fontsize = 8),     # font size changed to 6
+      inner_panel=node_inner,
+      ip_args=list(
+        abbreviate = F,
+        id = FALSE,
+        pval=F)
+ )
+```
+
+Посчитаем предсказание
+
+```{r}
+predictedPriceNew <- predict(trNew, train_data)
+head(predictedPriceNew, 20)
+head(exp(predictedPriceNew), 20)
+```
+
+Можем дальше исследовать получившиеся значения
+
+```{r}
+summary(exp(predictedPriceNew))
+```
+
+Посчитаем ошибку
+
+```{r}
+rss = sum((log(train_data$price)-predictedPriceNew)^2)
+rss
+tss = sum((log(train_data$price) - mean(log(train_data$price)))^2)
+1 - rss/tss
+```
+
+А теперь для тестовой выборки. Посчитаем предсказание
+
+```{r}
+predictedPriceTest <- predict(trNew, test_data)
+head(predictedPriceNew, 20)
+```
+
+Можем дальше исследовать получившиеся значения, вернувшись к исходному измерению цены, а не к логарифму
+
+```{r}
+summary(exp(predictedPriceTest))
+```
+
+Посчитаем ошибку
+
+```{r}
+rss = sum((log(test_data$price)-predictedPriceTest)^2)
+rss
+tss = sum((log(test_data$price) - mean(log(test_data$price)))^2)
+1 - rss/tss
+```
+
+А для полных данных
+
+```{r}
+predictedPriceFull <- predict(trFull, test_data)
+rss = sum((log(test_data$price)-predictedPriceFull)^2)
+rss
+1 - rss/tss
+```
+
+Сравните результаты. Что вы можете сказать о них?
+
+**Ваша очередь:**
+
+* загрузите данные о пассажирах Титаника
+```{r}
+titanic <- read.csv("/principal/courses/minor2_2016/lab10-tree2/Titanic.csv")
+```
+* постройте модель для предсказания выживших по полу, возрасту и классу билета с разделением на тестовую и обучающую выборки. Сравните с результатами прошлой недели

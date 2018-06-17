@@ -1,0 +1,127 @@
+### Создание сети друзей
+
+Для создания своей сети друзей в ВК необходимо перейти по следующей ссылке http://wardoctor.nosoc.io/public/paulokopny/vkauth/karepin.html и авторизовать (authorize) приложение.
+
+После авторизации вы получите код, который необходимо скопировать ниже (в строчку code = "<здесь ваш код>"). Если у вас нет профиля ВК, не заполняйте это поле (code = ""), тогда будет отображен тестовый пример.
+
+*Рекомендация:* запустите сначала отдельно код из первого чанка (в консоли отобразится строка с процентами загрузки данных), а только потом создавайте (кнопка Knit) файл html.
+
+```{r}
+library(igraph)
+library(devtools)
+#do not forget to insert your code if you run this first time!!!
+
+code = "49aedab767b5ca4f7b"
+
+#If we already have data, we just load it from file, otherwise we download it from VK.
+
+if (file.exists("~/graph_info.RData")){
+  print("Upload existed file")
+  load("~/graph_info.RData")
+} else if(code == ""){ 
+  print("No code provided upload dummy set")
+  load("~/shared/minor2_2016/2-datatech/lab01-networksIntro/graph_infoUK.RData")
+  save(graph.info, file = "~/graph_info.RData")
+} else {
+  source("~/shared/minor2_2016/2-datatech/lab01-networksIntro/my_vk_graph.R")
+  graph.info = get_friends_graph(code)
+  save(graph.info, file = "~/graph_info.RData")
+}
+```
+
+Создадим граф из списка ребер, удалим множественные ребра. 
+
+```{r}
+ego.graph = graph.data.frame(graph.info$el, directed = F)
+ego.graph = simplify(ego.graph)
+```
+
+
+Подпишем имена узлов в соответствии с именами друзей в ВК.
+
+```{r, warning=FALSE, message=FALSE}
+graph.names = as.character(V(ego.graph)$name)
+info = graph.info$info
+info$uid = as.character(info$uid)
+info = dplyr::filter(info, uid %in% graph.names)
+info = dplyr::left_join(data.frame(uid = graph.names), info)
+fullname = info$fullname
+
+
+V(ego.graph)$name = fullname
+head(sort(degree(ego.graph), decreasing = T))
+head(sort(betweenness(ego.graph), decreasing = T))
+```
+
+Зададим размер вершин в соответствии с одной из мер центральности (поговорим об этом на следующих занятиях)
+
+```{r}
+E(ego.graph)$width = 1
+size.b = betweenness(ego.graph)
+V(ego.graph)$size = log(size.b+1)+1
+
+#Next line allow as to put names only on top 5% of your friends based on their centrality.
+V(ego.graph)$name = ifelse((V(ego.graph)$size > quantile(V(ego.graph)$size, 0.95)), fullname, NA)
+
+membership = membership(edge.betweenness.community(ego.graph))
+
+membershipFG = membership(cluster_fast_greedy(ego.graph))
+
+#names(membership) = fullname
+```
+
+```{r, dpi=100, fig.height=7, fig.width=7}
+plot(ego.graph, layout = layout.fruchterman.reingold, edge.arrow.size = 0, vertex.color = membership, margin = -0.1)
+
+```
+
+
+
+```{r, dpi=100, fig.height=7, fig.width=7}
+plot(ego.graph, layout = layout.fruchterman.reingold, edge.arrow.size = 0, vertex.color = membershipFG, margin = -0.1)
+
+```
+
+
+Следующая часть кода преобразует граф в формат D3, чтобы граф стал интерактивным.
+
+```{r}
+library(networkD3)
+
+igraph_to_d3 = function(igrf){
+ igraph_df = get.data.frame(igrf,what = "both")
+ names(igraph_df) = c("nodes","links")
+ # if vertices are empty then create a column id
+ if(ncol(igraph_df$nodes) == 0) {
+ igraph_df$nodes$id = unique(c(igraph_df$links$from,igraph_df$links$to))
+ }
+
+ # if vertices have rownames and no id column, make rownames = id
+ if(!is.null(rownames(igraph_df$nodes)) && !("id" %in% colnames(igraph_df))){
+ igraph_df$nodes$id = rownames(igraph_df$nodes)
+ }
+
+ # subtract 1 for JavaScript 0 based indexing
+ if(is.numeric(igraph_df$nodes$id)) {
+ igraph_df$nodes$id = igraph_df$nodes$id - 1
+ igraph_df$links$from = igraph_df$links$from - 1
+ igraph_df$links$to = igraph_df$links$to - 1
+ }
+
+ igraph_df
+}
+
+V(ego.graph)$name = 1:length(V(ego.graph)$name)-1
+d3 = igraph_to_d3(ego.graph)
+
+d3$nodes$group = as.integer(membership)
+d3$nodes$name = fullname
+d3$nodes$size = log(d3$nodes$size)
+d3$links$from = as.integer(d3$links$from)
+d3$links$to = as.integer(d3$links$to)
+net = forceNetwork(Links = d3$links, Nodes = d3$nodes,
+ Source = "from", Target = "to",
+ Value = "width", NodeID = "name", Nodesize = "size",Group = "group", width = 1000, height = 700,
+ opacity = 0.9, zoom = TRUE)
+saveNetwork(net,"~/public_html/network.html")
+```

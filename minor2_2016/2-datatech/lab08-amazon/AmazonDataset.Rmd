@@ -1,0 +1,267 @@
+---
+title: "Introduction to Amazon Dataset"
+author: "Alena Suvorova"
+date: "11 04 2017"
+output: html_document
+---
+
+##Данные
+
+Общий датасет включает данные Amazon.com (отзывы и метаданные), всего 142.8 миллионов отзывов за период с мая 1996 по июль 2014.
+
+Данные состоят из трех разделов: отзывы (текст отзыва, его полезность, поставленная в нем оценка, автор отзыва, продукт, на который написан отзыв); метаданные продукта (описание, информация о категориях товара, рейтинг, цена, бренд); и рекомендации Амазона (с эти товаром покупают, с этим товаром также смотрят). 
+
+Подробности <http://jmcauley.ucsd.edu/data/amazon/>. Мы работаем с категорией *Фильмы и ТВ*. 
+
+Т.к. полностью датасет достаточно большой, то мы будем работать с его частями. Сегодня рассмотрим, как работать с данными, на примере с 500 фильмами и 500 ревьюерами. 
+
+##Загрузка данных
+
+Данные представлены в формате JSON, как выглядит, например, записсь о первом отзыве:
+
+```{r echo=FALSE}
+readLines("~/shared/minor2_2016/data/reviews_Movies_and_TV_5_sub1.json", n=2)
+```
+
+где
+
+* reviewerID - ID автора отзыва, например, A345WVAVMMO6F0
+* asin - ID продукта, например, 0767800761
+* reviewerName - имя автора отзыва
+* helpful - полезность отзыва (два числа: сколько раз этот отзыв посчитали полезным и сколько раз его оценили всего)
+* reviewText - текст отзыва
+* overall - оценка в отзыве
+* summary - заголовок отзыва
+* unixReviewTime - время отзыва (unix time)
+* reviewTime - время отзыва (raw)
+
+Тот же самый [отзыв](https://www.amazon.com/gp/customer-reviews/R1V3UJQQMEINAN/ref=cm_cr_getr_d_rvw_ttl?ie=UTF8&ASIN=0767800761) на сайте
+
+Чтобы преобразовать данные (разобрать, "распарсить") из такого формата в привычную таблицу, мы используем библиотеку  `jsonlite`.
+
+```{r}
+library(jsonlite)
+library(stringr)
+```
+
+Чтение и преобразование данных
+
+```{r}
+j = readLines("~/shared/minor2_2016/data/reviews_Movies_and_TV_5_sub1.json") %>% 
+  str_c(collapse = ",") %>%  
+  (function(str) str_c("[", str, "]")) %>% 
+  fromJSON(simplifyDataFrame = T)
+```
+
+Посмотрим на данные
+
+```{r}
+head(j, n=3)
+```
+
+И обратим внимание на структуру
+
+```{r}
+str(j, max.level = 1)
+```
+
+##Исследование данных
+
+####Оценки
+
+Посмотрим, склонны ли пользователи писать позитивные отзывы (отзывы с высокими оценками) 
+
+```{r}
+library(ggplot2)
+ggplot(data = j) + geom_bar(aes(x=overall)) + xlab("Product rating")
+```
+
+Средние оценки, поставленные каждому товару (из нашего сокращенного датасета). Какие выводы можно сделать?
+
+```{r}
+library(dplyr)
+j2 <- j %>% group_by(asin) %>% summarise(rate = mean(overall))
+ggplot(data = j2) + geom_histogram(aes(x=rate), binwidth = 0.5) + xlab("Average rate")
+```
+
+####Полезность
+
+Проверим, был ли отзыв **полезным**
+
+```{r}
+head(j$helpful)
+```
+
+Сейчас это пара чисел: сколько раз этот отзыв посчитали полезным и сколько раз его оценили всего. Преобразуем данные к доле отметок "полезный" в общем числе отметок.
+
+```{r}
+helpf <- unlist(j$helpful)
+head(helpf)
+```
+
+После такого преобразования каждое число на нечетной позиции (1, 3, 5, ...) -- это количество голосов "да, отзыв был полезным" , каждое число на четной позиции -- число голосов всего. Разделим значения на два вектора
+
+```{r}
+yes <- rep(c(T,F), length(j$helpful))
+j$helpful_yes <- helpf[yes]
+j$helpful_total <- helpf[!yes]
+```
+
+Сколько всего в голосов получили отзывы
+
+```{r}
+ggplot(data = j) + geom_histogram(aes(x=helpful_total)) + xlab("Voting")
+```
+
+```{r}
+n <- dim(j)[1] # number of reviews
+```
+
+Доля отзывов без голосов
+
+```{r}
+sum(j$helpful_total==0)/n 
+```
+
+Доля отзывов с более 10 голосами
+
+```{r}
+sum(j$helpful_total>10)/n 
+```
+
+Посчитаем полезность (долю голосов "за"). Отобразим результаты для отзывов, получивших более 10 голосов. Какие выводы можно сделать?
+
+```{r}
+## helpfullness ratio
+j$helpfulness[j$helpful_total>0] <- j$helpful_yes[j$helpful_total>0]/j$helpful_total[j$helpful_total>0]
+
+ggplot(data = j[j$helpful_total>10,]) + geom_histogram(aes(x=j$helpfulness[j$helpful_total>10])) + xlab("Helpfulness")
+
+ggplot(data = j) + geom_point(aes(x=j$helpful_total, y = j$helpfulness)) + ylab("Helpfulness") + xlab("Total number of votes")
+```
+
+Можно отобразить и изменение полезности в отзывах с разными оценками
+
+```{r}
+j10 = j[j$helpful_total>10,]
+j10  %>% group_by(asin)  %>% summarise(overall=mean(overall), hy=sum(helpful_yes), ht=sum(helpful_total))  %>% 
+  mutate(band = cut(overall, 5))  %>% 
+  group_by(band)  %>%  summarise(n = n(), prophelp = sum(hy)/sum(ht))   %>%  
+  ggplot() + geom_bar(aes(band, n), stat="identity") + geom_bar(aes(band, n*prophelp), fill="red", stat="identity")
+```
+
+#### Даты и время
+
+Посмотрим, как изменяется число отзывов и их полезность с течением времени. Какие особенности можно заметить?
+
+```{r}
+library(lubridate)
+j$reviewTime<-mdy(j$reviewTime)
+
+ggplot(data = j) + geom_histogram(aes(x=j$reviewTime)) + xlab("Time")
+
+ggplot(data = j) + geom_point(aes(x=j$reviewTime, y = j$helpful_total)) + ylab("Votes") + xlab("Time")
+
+```
+
+
+#Создание сети
+
+В данном случае будем работать с бимодальными (bipartite) сетями. Бимодальная сеть -- это сеть, где вершины двух типов (в нашем случае -- фильмы и авторы отзывов), а связи могут быть только между вершинами разных типов. Для создания бимодальной сети нужно указать, что у есть два типа вершин.
+
+```{r}
+reviewers <- data.frame(name = unique(j$reviewerID), type=T)
+items <- data.frame(name = unique(j$asin), type=F)
+nodes <- rbind(reviewers, items)
+```
+
+Что является связью между вершинами?
+
+```{r}
+edges = data.frame(from=j$reviewerID, to=j$asin)
+head(edges)
+```
+
+С каким представлением графа мы имеем дело (матрица смежности, список ребер)?
+
+```{r message=FALSE}
+library(igraph)
+g <- graph_from_data_frame(edges, directed=TRUE, vertices=nodes)
+g
+```
+
+Т.к. вершины у нас разных типов, то мы создали бимодальную сеть. 
+
+###Сохранение объектов R
+
+Мы можем сохранять любые объекты R в файл и загружать их для работы позже. В этом случае не нужно будет повторять все операции по очистке предобработке данных, построению графа, что важно при работе с объемными датасетами. 
+
+```{r}
+#save(g, file = "initialGraph.RData")
+load(file = "initialGraph.RData")
+```
+
+Для загрузки данных позже используйте 'load("initialGraph.RData")'. После выполнения этой функции объект 'g' появится в окружении (environment).
+
+##Проекции сети
+
+Можеи ли мы создать сеть, где вершинами будут только пользователи, а связями -- написание отзыва на один т тот же продукт?
+
+```{r}
+pr = bipartite.projection(g)
+```
+
+Подробности о проекциях в 'igraph' можно посмотреть в справке '?bipartite.projection'
+
+```{r}
+p <- pr[[2]]
+p
+```
+
+Прочтите справку. Вторая проекция будет соответствовать сети фильмов или сети пользователей?
+
+```{r}
+V(p)$label <- NA
+lt = layout.fruchterman.reingold(p)
+plot(p, vertex.size = 2, layout = lt)
+library(ggraph)
+ggraph(p)
+c <- fastgreedy.community(p)
+#plot(p, vertex.size = 2, vertex.color=membership(c)+2, layout = lt)
+
+ggraph(p, layout = "fr") +
+  geom_edge_link() +
+  geom_node_point(aes(color=as.factor(membership(c)))) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1)
+```
+
+Проверим, есть ли связь между полезностью отзыва и количеством связей у пользователя.
+
+Считаем количество связей
+
+```{r}
+connection = data.frame(reviewerID = V(p)$name,
+                        degree = degree(p))
+```
+
+Возьмем только отзывы с более 10 голосами посчитаем среднюю полезность отзыва у каждого пользователя. Будем считать отзыв полезным, если его  полезность > 0.5
+
+```{r}
+helpj10 = j10  %>% group_by(reviewerID)  %>% summarise(help=mean(helpfulness))  %>%
+  mutate(isHelp = help>0.5)
+```
+
+Соединяем датасеты
+
+```{r}
+helpj10$reviewerID = as.factor(helpj10$reviewerID)
+helpj10 = left_join(helpj10, connection, by = "reviewerID") 
+
+ggplot(data = helpj10) + geom_point(aes(x=help, y = degree)) + xlab("Helpfulness")
+```
+
+Проверим формально. Какие выводы можно сделать?
+```{r}
+t.test(degree~isHelp, data = helpj10)
+```
+

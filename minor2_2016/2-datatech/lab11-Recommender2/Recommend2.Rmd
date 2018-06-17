@@ -1,0 +1,100 @@
+---
+title: "Recommendation evaluation"
+output: html_document
+---
+
+Несколько слов про оценку рекомендации и сравнение моделей.
+
+Сначала повторим все действия для построения модели
+
+```{r message = FALSE}
+library(jsonlite)
+library(stringr)
+library(dplyr)
+library(readr)
+library(recommenderlab)
+```
+
+Чтение и преобразование данных (см. предыдущую лабораторную)
+
+```{r}
+j = read_lines("~/shared/minor2_2016/data/amazon/reviews_Movies_and_TV_5_sub48.json") %>% 
+  str_c(collapse = ",") %>%  
+  (function(str) str_c("[", str, "]")) %>% 
+  fromJSON(simplifyDataFrame = T)
+
+jmeta = readLines("~/shared/minor2_2016/data/amazon/meta_Movies_and_TV_5_sub48.json") %>% 
+  str_c(collapse = ",") %>%  
+  (function(str) str_c("[", str, "]")) %>% 
+  fromJSON(simplifyDataFrame = T)
+```
+
+Возьмем из мета-информации только заголовки, цену и описание и уберем комментарии в скобках в заголовках
+
+```{r}
+jmeta = select(jmeta, title, asin, price, description)
+jmeta$title = str_replace_all(jmeta$title, "\\(.*\\)", "")
+jmeta$title = str_replace_all(jmeta$title, "\\[.*\\]", "")
+```
+
+```{r}
+rates0 = select(j, reviewerID, asin, overall)
+library(tidyr)
+rates = spread(rates0, key = asin, value = overall)
+rownames(rates) = rates$reviewerID
+rates = select(rates, -reviewerID)
+rates = as.matrix(rates)
+r = as(rates, "realRatingMatrix")
+#ratings_movies <- r[rowCounts(r) > 5, colCounts(r) > 10] 
+ratings_movies = r
+```
+
+Строим модель и предсказание
+
+```{r}
+recc_model <- Recommender(data = ratings_movies, method = "IBCF")
+recc_predicted <- predict(object = recc_model, newdata = ratings_movies, n = 6)
+```
+
+Рекомендации для пользователя A13E0ARAXI6KJW
+```{r}
+recc_user_1 <- recc_predicted@items[["A13E0ARAXI6KJW"]]
+movies_user_1 <- recc_predicted@itemLabels[recc_user_1]
+names_movies_user_1 <- jmeta$title[match(movies_user_1, jmeta$asin)]
+names_movies_user_1
+recc_predicted@ratings[["A13E0ARAXI6KJW"]]
+```
+
+Построим рекомендацию по второй модели
+```{r}
+counts = j %>% group_by(asin) %>% summarize(reviews = n(), average = mean(overall))
+data = left_join(counts, jmeta, by = "asin")
+data = as.data.frame(data)
+data$length = str_length(data$description)
+rownames(data) = data$asin
+data = select(data, -description, -title, -asin)
+data = as.matrix(data)
+library(lsa)
+data[is.na(data)] = 0
+dist = cosine(t(data))
+```
+
+Находим фильмы пользователя A13E0ARAXI6KJW с максимальной оценкой
+
+```{r}
+films = rates0 %>% filter(reviewerID == "A13E0ARAXI6KJW") %>% top_n(3, overall)
+movies_user_2 = names(tail(sort(dist[films$asin[1],])))
+names_movies_user_2 <- jmeta$title[match(movies_user_2, jmeta$asin)]
+names_movies_user_2
+```
+
+Теперь полученные результаты можно сравнивать по разным параметрам: 
+* жанры (если есть)
+* принадлежность к какому-то классу
+* схожесть по оценкам и т.д.
+
+```{r}
+model_details <- getModel(recc_model)
+model_details$sim[movies_user_2, movies_user_1]
+```
+

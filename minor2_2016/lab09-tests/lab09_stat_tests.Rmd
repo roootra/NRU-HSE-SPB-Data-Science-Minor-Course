@@ -1,0 +1,240 @@
+---
+title: "Lab 9: Статистические тесты"
+---
+
+Не забываем загружать пакеты, которые нужны для работы  
+  
+```{r}
+library(ggplot2)
+library(dplyr)
+```
+
+### По мотивам лекции
+
+Загрузим данные про оценки по математике и социологии для экономистов и социологов (+ перцентиль в соответствующем рейтинге, нормированная оценка, специальность и запись на майнор)
+
+```{r, results='asis'}
+rates <- read.csv("~/shared/minor2_2016/lab09-tests/rates.csv")
+```
+
+Посмотрим на разницу в оценках по графикам. Что можно сказать?
+
+```{r}
+ggplot(rates) +
+  geom_boxplot(aes(x=Major, y=Soc))
+
+ggplot(rates) +
+  geom_boxplot(aes(x=Major, y=Math))
+
+```
+
+Вычислим разность средних оценок явным образом (для отличия от лекции -- по социологии)
+
+```{r}
+All_means <- group_by(rates, Major) %>%
+  summarize(Math.observed = mean(Math), Soc.observed = mean(Soc), s = sum(abs))
+All_means
+diff.observed <- All_means$Soc.observed[1] - All_means$Soc.observed[2]
+diff.observed
+```
+
+Можем ли мы сказать велика ли разница?
+
+### Гипотеза
+
+Попробуем понять, есть какая-то закономерность приводящая к разнице оценок, или это всего лишь случайность.
+
+
+1. Сформулируем наш вопрос на языке статистики (то есть определим $H_0$ и $H_A$)
+    - Например: $H_0:$ Средняя оценка по социологии одинаковая для экономистов и социологов; $H_A:$ Средние оценки различаются.
+2. Выберем уровень значимости ($\alpha$ -- допустимая вероятность **ошибочно** отклонить **истинную** $H_0$)
+3. Определим подходящую к нашим данным статистику и вычислим ее.
+4. Проверим, достаточно ли у нас оснований отклонить нулевую гипотезу (для выбранного значения $\alpha$)
+5. Сформулируем наши выводы на "человеческом" языке.
+
+### Random Permutation Test
+
+Вспомним разницу в средней оценке которую мы наблюдали: `r diff.observed`
+
+**При тестировании мы предполагаем, что нуль-гипотеза истинна.**
+  
+  Давайте посмотрим как разность будет себя вести в разных случаях. Напомню, мы предполагаем, что в среднем разницы нет. Тогда если мы перемешаем наши оценки и раздадим их случайно, то особо ничего измениться не должно.
+
+Давайте случайно перемешивать оценки и записывать разницу между средней оценкой социологов и средней оценкой экономистов.
+
+```{r}
+
+count_diff <- function(number_of_permutations = 1000) {
+ diff.random  <- rep(NA_real_, number_of_permutations) # вектор с неопределенными (пустыми) значениями,
+                                                      # в который будем записывать вычисленные разницы
+  for (i in 1 : number_of_permutations) {
+    
+    # перемешиваем оценки
+    shuffled = sample(rates$Soc, length(rates$Soc))
+    
+    # выбираем те оценки, что после перемешивания оказались у социологоы
+    Soc.random = shuffled[rates$Major == "Соц"] 
+    # выбираем те оценки, что после перемешивания оказались у экономистов
+    Econ.random = shuffled[rates$Major == "Экон"] 
+    
+    # вычисляем разность средних
+    diff.random[i] = mean(Soc.random) - mean(Econ.random)
+  }
+  return(diff.random)
+}
+```
+
+Генерируем случайные перестановки и любуемся картинками
+
+```{r}
+number_of_permutations <- 3500
+diff.random <- count_diff(number_of_permutations)
+
+df <- data.frame(diff.random = diff.random)
+g <-
+  ggplot(df) +
+  geom_histogram(aes(diff.random), fill="steelblue")
+g
+```
+
+Добавим разность которую мы наблюдали
+
+```{r}
+g <- g + geom_vline(xintercept=diff.observed, color="black")
+g
+
+```
+
+Добавим 5% критическую область
+
+```{r}
+q <- quantile(diff.random, c(0.025, 0.975))
+```
+
+```{r}
+g <- g +
+  geom_vline(xintercept=q[1], color="red") +
+  geom_vline(xintercept=q[2], color="red")
+g
+```
+
+Что такое **p-value**? (см. лекцию)
+
+Посчитаем количество перестановок у которых разность была больше и поделим на общее число экспериментов.
+
+```{r}
+pvalue = sum(abs(diff.random) >= abs(diff.observed)) / number_of_permutations
+pvalue
+```
+
+* Какой вывод можно сделать?
+
+## t-критерий
+
+Сравним абсолютные оценки у пришедших и не пришедших на майнор
+
+```{r}
+hist(rates$abs)
+t.test(abs~DS_minor, data = rates)
+
+library(MASS) 
+```
+
+* Выводы? 
+* Проведите это же сравнение с помощью теста перестановок. Есть ли различия?
+
+## Хи-квадрат
+
+Есть ли взаимсовязь между выбором майнора и специальностью? Другими словами, влияет ли специальность на выбор майнора?
+
+```{r, results='asis', echo=FALSE}
+pander::pandoc.table(table(rates$Major, rates$DS_minor))
+```
+
+Формальные результаты теста
+```{r}
+ch <- chisq.test(rates$Major, rates$DS_minor)
+ch
+```
+
+* Выводы?
+
+Наблюдаемые и ожидаемые значения
+```{r}
+ch$observed
+ch$expected
+```
+
+Таблица Пирсоновских остатков 
+```{r}
+ch$residuals
+```
+
+Отклонения от ожидаемого
+```{r}
+library(vcd)
+assoc(table(rates$Major, rates$DS_minor), gp=shading_max, rot_labels = c(0, 0, 0, 0), rot_varnames = c(0, 0, 0, 0))
+```
+
+Или же все вместе на одном графике (полезно, если таблицы больше, чем на 2 на 2)
+
+```{r, fig.align='center', fig.height=6, fig.width=10}
+df_resid = as.data.frame(ch$residuals)
+df_resid
+df_count = as.data.frame(ch$observed)
+df_count
+
+ggplot() + 
+  geom_raster(data = df_resid, aes(x = rates.Major, y = rates.DS_minor, fill = Freq), hjust = 0.5, vjust = 0.5) + 
+  scale_fill_gradient2("Pearson residuals", low = "#2166ac", mid = "#f7f7f7", high = "#b2182b", midpoint = 0) +
+  geom_text(data = df_count, aes(x = rates.Major, y = rates.DS_minor, label = Freq)) +
+  xlab("Major") +
+  ylab("DS Minor") +
+  theme_bw()
+```
+
+## Ваша очередь
+
+Загрузите  базу по колледжам
+
+```{r}
+colleges = ISLR::College
+?ISLR::College
+colleges = colleges %>% filter(Accept > 2000)
+t.test(Expend~Private, data = colleges)
+
+ggplot(data = colleges, aes(x = Top10perc, y = PhD)) + geom_point()
+ggplot(data = colleges, aes(x = Personal, y = Room.Board)) + geom_point()
+ggplot(data = colleges, aes(x = Personal, y = PhD)) + geom_point()
+ggpairs(colleges[2:18])
+library(corrplot)
+corrplot(res2)
+library(Hmisc)
+res2<-cor(colleges[2:18])
+
+```
+
+Ответьте на вопросы, используя подходящие тесты. При ответе как минимум на два вопроса используйте одновременно тест перестановок и t-тест, сравните результаты. Обратите внимание, что для ответа на некоторые вопросы недостаточно исходных переменных, а нужно их преобразовать (посчитать доли, разделить на группы и т.д.)
+
+* Есть ли взаимосвязь между числом подаваемых в колледж заявлений и его типом (частный - государственный)
+* Отличаются ли частные и государственные колледжи по доле принятых заявлений
+* Есть ли взаимосвязь между тем, что доля принятых заявлений составляет более 75%, и типом колледжа
+
+```{r}
+colleges <- mutate(colleges, accepted75 = Accept/Apps > 0.75)
+ch <- chisq.test(colleges$accepted75, colleges$Private)
+ch
+ch$residuals
+assoc(ch$observed, gp=shading_max, rot_labels = c(0, 0, 0, 0), rot_varnames = c(0, 0, 0, 0))
+
+```
+
+* Есть ли взаимосвязь между числом студентов-бакалавров (F.Undergrad + P.Undergrad) и типом колледжа
+* Отличаются ли частные и государственные колледжи по числу выпускников, оказывающих помощь (perc.alumni)
+* Есть ли взаимосвязь между тем, что доля окончивших колледж (Grad.Rate) составляет более 50%, и его типом 
+* Есть ли взаимосвязь между тем, что на одного сотрудника приходится больше 15 студентов (S.F.Ratio), и типом колледжа
+* Есть ли взаимосвязь между уровнем расходов на книги (Books) и типом колледжа
+* Есть ли взаимосвязь между тем, что доля сотрудников с PhD составляет более 75%, и типом колледжа
+* Разделите колледжи на 4 группы по доле принятых заявлений: 1) менее 65%, 2) от 65% до 75%, 3) от 75% до 85%, 4) более 85%. Есть ли взаимосвязь между принадлежностью к группе и типом колледжа
+
+* ... Ваши варианты вопросов

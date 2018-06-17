@@ -1,0 +1,102 @@
+---
+title: "Программирование для анализа данных и воспроизводимые исследования. Lab 2"
+output: slidy_presentation
+---
+
+## Содержание
+
+
+- Воспроизводимые исследования (Reproducible Research)
+- Этапы исследования
+- ToolBox: Библиография
+- ToolBox: Как это работает?
+- Поиск источников
+- ToolBox: Добавление и цитирование источников
+- Ваша тема в Data Science
+- Ваш первый отчет
+
+## Воспроизводимые исследования (Reproducible Research)
+
+- Что такое воспроизводимость?
+- Зачем она нужна (в науке, в бизнесе)?
+- Причем тут Data Science?
+
+## Цикл воспроизводимого исследования
+
+```{r echo=F}
+library(DiagrammeR)
+mermaid("
+ graph LR
+         subgraph Science
+         s[Science Stuff]-->RQ
+          RQ-->Data
+         end
+         subgraph Computation
+         Analysis-->C[Comp.Results]
+         C-->T[Tables]
+         C-->F[Figures]
+         C-->N[Numbers]
+         end
+         subgraph Result
+         A[Paper]
+         end
+         Data-->Analysis
+         T-->A
+          F-->A
+          N-->A
+")
+```
+
+## Этапы исследования
+
+- Что нам необходимо?
+- Что нам необходимо для написания отчета?
+
+## ToolBox: Как это работает?
+
+```{r echo=F}
+
+mermaid("
+graph LR
+  RMarkdown-->R
+  subgraph R
+    R-->B[Parse Biblio]
+    R-->G[Draw Figures]
+    R-->T[Render Tables]
+    R-->S[other stuff]
+  end
+  subgraph Export
+    Markdown-->HTML
+    Markdown-->Word
+    Markdown-->PDF
+  end
+  B-->Markdown
+  G-->Markdown
+  T-->Markdown
+  S-->Markdown
+")
+```
+
+## Источники
+
+- Поиск источников: Google Scholar и не только
+- ToolBox: Добавление и цитирование источников
+
+## ToolBox: Библиография
+
+- Скопируйте `citation.bib` и `citations-sample.Rmd` из `~/shared/minor2_2016/lab02`
+- Что внутри?
+- [Справка по цитированию](http://rmarkdown.rstudio.com/authoring_bibliographies_and_citations.html#citations)
+
+## Ваша тема
+
+- что вам интересно
+
+## Задание: Ваш первый отчет
+
+- Скопируйте `report.Rmd`, `citation.bib`, и `scopus.csv` к себе
+- Подумайте и ключевых словах по вашей теме
+- Напишите, почему эта тема вам интересна
+- Используйте ключевые слова в Google Scholar
+- Сохраните bibtex-описание для 3-5 наиболее популярных или недавних статей (не забывайте читать аннотации!)
+- Напишите 2-3 параграфа о найденных источниках, цитируя их различными способами

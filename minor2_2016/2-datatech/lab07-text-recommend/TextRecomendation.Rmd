@@ -1,0 +1,164 @@
+---
+title: "Recommendation and Text"
+output: html_document
+---
+
+Продолжаем работу с текстом и вспоминаем лекцию про рекомендательные системы
+
+* Приведите примеры рекомендательных систем
+* На основе чего можно делать рекомендации?
+
+Один из этапов построения рекомендаций -- выявление похожих объектов.
+
+* Если мы хотим рекомендовать фильмы, нам нужно искать похожие фильмы или похожих пользователей?
+
+* Как понять / посчитать, что объекты похожи?
+* Как определить, похожи ли тексты (например, отзывы)?
+
+#### Отзывы на отели и их похожесть
+
+Рассмотрим уже знакомый датасет с отзывами на отели
+
+```{r}
+library(tidytext)
+library(tidyr)
+library(dplyr)
+
+load(file="~/shared/minor2_2016/2-datatech/lab06-text-3/reviews.rda")
+rev.df$stars = rev.df$stars %>% as.factor()
+```
+
+Оставим только отзывы на 4* отели
+
+```{r}
+review4 = rev.df %>% filter(stars == 4)
+```
+
+Дальше мы будем работать с пакетом quanteda, так что преобразуем данных в нужный формат
+
+```{r}
+library(quanteda)
+docs = corpus(review4$review)
+```
+
+Сначала посмотрим, насколько отзывы похожи друг на друга по категориям расположение, сервис и еда (см. лаб.05)
+
+```{r}
+topic.words = read.csv("~/shared/minor2_2016/2-datatech/lab05-text-2/hotels_topic_words.csv") # загрузка слов
+topic.words %>% group_by(topic) %>% count(sort=T)
+```
+
+Собираем слова, характеризующие расположение
+```{r}
+placement = filter(topic.words,topic=="расположение") # фильтруем по теме расположение
+placement = placement$top_words %>% as.character() %>% strsplit(split = " ") # делаем вектор из текстового значения, где пробелы между словами
+placement = unlist(placement) %>% unique() # объединяем все векторы в один, удаляем повторяющиеся слова
+placement
+```
+
+Собираем слова, характеризующие сервис
+```{r}
+service = filter(topic.words,topic=="сервис")
+service = service$top_words %>% as.character() %>% strsplit(split = " ")
+service = unlist(service) %>% unique()
+service
+```
+
+И задаем слова про еду
+```{r}
+meal = c("чай", "еда", "завтрак", "бар", "ресторан", "кофе", "шведский","лобби", "посидеть", "ресторан", "напиток", "вкусный", "обслуживание", "каша", "блюдо", "сытный", "чайник", "попить", "сок", "вода", "чашка", "вода", "йогурт", "нарезка", "яйцо","приготовление", "сосиска", "омлет", "выпивать", "вкусно", "кухня", "кафе", "еда", "итальянский", "поужинать", "блюдо", "голодны", "меню", "стол", "свежий")
+
+meal
+```
+
+Строим словарь из получившихся списков
+```{r}
+myDict <- dictionary(list(placement=placement,
+                          service=service, 
+                          meal=meal))
+```
+
+Создаем матрицу частот слов с одновременным удалением стоп-слов и применяем созданный словарь
+```{r}
+myDfm <- dfm(docs,verbose = TRUE, what="word",
+             ignoredFeatures = c(stopwords(kind = "russian"),"очень","отель") )
+g = applyDictionary(myDfm,myDict, case_insensitive = TRUE)
+countTopics = cbind(review4,as.data.frame(g))
+head(countTopics %>% arrange(desc(meal)))
+head(as.data.frame(g))
+```
+
+Найдем отзывы, похожие по частоте употребления слов из рассматриваемых категорий
+
+#### Косинусное расстояние
+
+Rаждый отзыв сейчас описывается тремя числами (placement, service, meal). Можно представить это как вектор и искать расстояния между векторами.
+
+Примеры расстояний:
+
+* евклидово
+* манхэттен
+* корреляция
+* косинус угла между векторами
+
+```{r}
+sim <- quanteda::similarity(g, selection = c("text1", "text2"), method = "cosine", 
+                  margin = "document", n = 10)
+sim
+```
+
+Очень много документов, похожих друг на друга по этим треи показателям.
+
+А теперь учтем все слова, без разделения на категории.
+
+Посмотрим тексты, похожие на text12
+```{r}
+freq <- tfidf(myDfm)
+sim12 <- quanteda::similarity(freq, selection = "text12", method = "cosine", margin = "document", n = 10)
+sim12
+```
+
+Схожесть всех текстов между собой
+```{r}
+sim <- quanteda::similarity(freq, method = "cosine", margin = "document")
+s=as.data.frame(as.matrix(sim))
+s=s[colnames(s),]
+```
+
+Первые 10 отзывов
+```{r}
+s[1:10, 1:10]
+```
+
+Найдем самые похожие отзывы. Для этого пребразуем данные в "длинную" таблицу
+```{r}
+s = s %>% mutate(doc1 = rownames(s))
+simil = gather(s, key= doc2, value = sim, -doc1) %>%
+  filter(sim<1) %>% #убираем идентичные отзывы
+  top_n(sim, n = 15) %>%
+  arrange(-sim)
+```
+
+Посмотрим на похожие отзывы
+```{r}
+textIds <- simil$doc2[1:10]
+similarReview = countTopics %>% filter(rownames(countTopics) %in% textIds)
+similarReview$review
+similarReview$rating
+```
+
+
+Внимание: Чем больше текстов, тем больше времени занимают вычисления
+
+Как все это поможет нам что-то рекомендовать? Например, выбираем отзыв с хорошей оценкой (text27) и ищем похожие на него
+```{r}
+sim27 <- quanteda::similarity(freq, selection = "text27", method = "cosine", margin = "document", n = 10)
+sim27
+
+countTopics[rownames(countTopics) %in% names(sim27$text27), "review"]
+countTopics[rownames(countTopics) %in% names(sim27$text27), "rating"]
+```
+
+**Ваша очередь:** 
+
+повторите анализ для 5* отелей – найдите похожие в этой категории; найдите отзывы, похожие на отзыв с названием "Дабл Ю ай Лов Ю"

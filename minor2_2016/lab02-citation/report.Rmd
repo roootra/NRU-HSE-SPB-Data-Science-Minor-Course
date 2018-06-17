@@ -1,0 +1,76 @@
+---
+bibliography: citation.bib
+output: html_document
+---
+
+# Data Science
+
+Data science is multidisciplinary field directed to knowledge extraction from data. It was called "datalogy"[@naur1966science p. 486]. Data science is often accoiated with "Big data", but there is some other features. Data science is focused around data analysis, statistics and organizing the knowledge[@dhar2013data].
+Dhar argues that "Data Science might therefore imply a focus around data and Statistics"[-@dhar2013data]. 
+
+The report is based on request by the phrase "Data Science" in the database of reviewed journals. (~200 papers)
+
+Below you can find table of the words that were used in titles of the articles from the sample and frequency of its usage. In addition, there is a **wordcloud**. It is a visual representation of text data, typically used to depict keyword metadata (tags) on websites, or to visualize free form text.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+library(CITAN)
+library(tm)
+library(pander)
+
+data <- Scopus_ReadCSV("./scopus.csv")
+
+keywords = stringr::str_c(as.character(data$Title), sep = " ", collapse = " ")
+
+keywords = tolower(c(keywords))
+keywords = removeWords(keywords, stopwords("english"))
+keywords = removeWords(keywords, c("a", "the", "an", "data", "science"))
+keywords = removePunctuation(keywords, preserve_intra_word_dashes = TRUE)
+keywords = removeNumbers(keywords)
+
+
+keywords = stringr::str_split(keywords, pattern = " ")
+
+key = table(keywords)
+key = sort(key, decreasing = TRUE)
+
+key[1] = 0
+key = sort(key, decreasing = TRUE)
+
+
+library(wordcloud)
+
+#wordcloud(names(key), key, scale = c(5, 0.5), min.freq = 3, random.order = FALSE, random.color = FALSE, colors= c("coral", "coral4"))
+
+
+keys = data.frame(key)
+keys$word = rownames(keys)
+rownames(keys) = NULL
+
+names(keys) = c("frequency", "keyword")
+```
+
+```{r results='asis'}
+pandoc.table(keys[1:5,])
+```
+
+![](http://pp.vk.me/c627323/v627323422/11df2/cwX0CzocQUQ.jpg)
+
+The plot shows the distribution of papers by its length. Dashed line is the mean. 
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+library(CITAN)
+library(ggplot2)
+sc <- Scopus_ReadCSV(filename = "./scopus.csv")
+sc$pg <- sc$PageEnd - sc$PageStart
+
+rating.mean <- mean(na.omit(sc$pg))
+ggplot(sc, aes(x=pg)) +
+    geom_histogram(binwidth=1, alpha=.5, position="identity", colour = "black") +
+    geom_vline(data=sc, aes(xintercept=rating.mean),
+               linetype="dashed", size=1) +
+    xlim(0, 35)
+
+```
+
+
+## References

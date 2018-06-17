@@ -1,0 +1,262 @@
+---
+title: "Lab05. Text mining"
+output: html_document
+---
+
+```{r}
+library(tidytext)
+library(ggplot2)
+library(wordcloud)
+library(tm)
+library(RColorBrewer)
+library(tidyr)
+library(stringr)
+library(dplyr)
+load("~/shared/minor2_2016/2-datatech/lab05-text-2/reviews.rda")
+stop_words = read.table("~/shared/minor2_2016/2-datatech/lab05-text-2/stopwords_ru.txt")
+stop_words$V1 = stop_words$V1 %>% as.character() %>% str_trim()
+names(stop_words)[1] = "word"
+rev.df$review = removeNumbers(rev.df$review)
+```
+
+Смотрим на самые частые слова в заголовках, чтобы понять выделяются ли какие-то темы
+
+```{r}
+quotes = rev.df %>%
+  unnest_tokens(word, quote)
+
+quotes = quotes %>%
+  anti_join(stop_words)
+
+
+quotes = quotes %>%
+  count(word, sort = TRUE) %>%
+  ungroup()
+  
+quotes %>% 
+  filter(n > 100) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_bar(stat = "identity") +
+  xlab(NULL) +
+  coord_flip()
+```
+
+Плохих слов нет в заголовках? Почему? Плохие оценки практически не ставят:
+```{r}
+ggplot(data=rev.df,aes(x=rating)) + geom_bar()
+```
+
+Давайте посмотрим, отличаются ли комментарии с разными оценками. В этом чанке мы разделяем отзывы с рейтингом меньше 3 и рейтингом равным 5. Мы сравниваем облака слов по двум этим датасетам. На что обращают внимание обе категории комментаторов?
+
+```{r}
+reviews = rev.df %>%
+  unnest_tokens(word, review) %>% anti_join(stop_words)
+
+rating2 = filter(reviews, rating < 3)
+rating2 = rating2 %>% count(word)
+rating2 = filter(rating2, n < 200)
+
+wordcloud(rating2$word,rating2$n,min.freq = 10, scale=c(0.5,3),max.words=50, colors = brewer.pal(8,"Set1"))
+
+rating5 = filter(reviews, rating == 5)
+rating5 = rating5 %>% count(word)
+rating5 = filter(rating5, n < 300)
+
+wordcloud(rating5$word,rating5$n,min.freq = 250, scale=c(2,3),max.words=50, colors = brewer.pal(8,"Accent"))
+```
+
+```{r}
+rating2 %>% 
+  filter(n > 50) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_bar(stat = "identity") +
+  xlab(NULL) +
+  coord_flip()
+
+rating5 %>% 
+  filter(n > 250) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_bar(stat = "identity") +
+  xlab(NULL) +
+  coord_flip()
+```
+
+
+Существует ли такая разница между звездами в отелях?
+Для каждой категории посчитайте частоты слов и затем нарисуйте облака слов. Чем они различаются?
+
+```{r}
+stars = reviews %>% group_by(stars) %>% count(word,sort=T)
+
+stars %>% 
+  filter(n < 200 & n > 150) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_bar(stat = "identity") +
+  xlab(NULL) +
+  coord_flip() + facet_wrap(~stars)
+```
+
+```{r}
+stars = filter(stars, n < 300)
+```
+
+```{r}
+stars3 = filter(stars, stars == 3)
+wordcloud(stars3$word,stars3$n,min.freq = 200, scale=c(0.5,6), colors = brewer.pal(8,"Accent"))
+```
+
+```{r}
+stars4 = filter(stars, stars == 4)
+wordcloud(stars4$word,stars4$n,min.freq = 200, scale=c(0.5,4), colors = brewer.pal(8,"Accent"))
+```
+
+```{r}
+stars5 = filter(stars, stars == 5)
+wordcloud(stars5$word,stars5$n,min.freq = 180, scale=c(0.5,4), colors = brewer.pal(8,"Accent"))
+```
+
+# Сравнение топиков
+
+Пакет quanteda работает аналогичным образом с tidytext, только он считает не все слова, а те, которые мы задаём им. На этом этапе мы загружаем результаты тематической модели. Тематическая модель выделила группы слов, которые часто встречаются вместе, мы составили из них "темы" отзывов. Для каждой темы мы знаем топ-20 слов. Давайте посмотрим, различаются ли отели с разными звездами на уровне тем.
+```{r}
+library(quanteda)
+topic.words = read.csv("~/shared/minor2_2016/2-datatech/lab05-text-2/hotels_topic_words.csv") # загрузка слов
+topic.words %>% group_by(topic) %>% count(sort=T)
+placement = filter(topic.words,topic=="расположение") # фильтруем по теме расположение
+placement = placement$top_words %>% as.character() %>% strsplit(split = " ") # делаем вектор из текстового значения, где пробелы между словами
+placement = unlist(placement) %>% unique() # объединяем все векторы в один, удаляем повторяющиеся слова
+```
+
+Попробуйте вытащить аналогичным образом слова по теме "сервис"
+```{r}
+service = filter(topic.words,topic=="сервис")
+service = service$top_words %>% as.character() %>% strsplit(split = " ")
+service = unlist(service) %>% unique()
+```
+
+```{r}
+meal = c("чай", "еда", "завтрак", "бар", "ресторан", "кофе", "шведский")
+furniture = c("мебель","белье","кровать")
+```
+
+
+Начинаем работу с пакетом. Сначала необходимо создать словари со словами, которые необходимо искать.
+```{r}
+myDict <- dictionary(list(placement=placement,service=service, meal=meal,furniture=furniture))
+```
+
+Возвращаемся к нашему изначальному датасету с отзывами. Приводим его в вид, понятный пакету.
+```{r}
+docs = corpus(rev.df$review)
+myDfm <- dfm(docs,verbose = TRUE,what="word")
+g = applyDictionary(myDfm,myDict, valuetype = "regex",case_insensitive = TRUE)
+g = as.data.frame(g)
+rev.topics = cbind(rev.df,g)
+
+rev.words = rev.topics %>% filter(id == "rn232715242" | id == "rn336165668") %>% 
+  unnest_tokens(word, review) 
+
+intersect(rev.words$word, placement)
+```
+
+Теперь можно смотреть, как для отелей с определенным рейтингом или категорией характерна та или иная тема.
+
+```{r}
+ggplot(data=rev.topics) +geom_boxplot(aes(x=as.factor(stars),y=service))
+ggplot(data=rev.topics) +geom_boxplot(aes(x=as.factor(rating),y=placement))
+
+ggplot(data=rev.topics) +geom_boxplot(aes(x=as.factor(rating),y=service))
+ggplot(data=rev.topics) +geom_boxplot(aes(x=as.factor(stars),y=placement))
+```
+
+```{r}
+stars5 = rev.topics %>% filter(stars == 5)
+bigrams = stars5 %>% 
+  unnest_tokens(word, review,token="ngrams",n=2) %>% count(word)
+bigrams = filter(bigrams,n < 400)
+wordcloud(bigrams$word,bigrams$n,min.freq = 200, scale=c(0.5,2.4), colors = brewer.pal(8,"Accent"))
+
+
+bigrams %>% top_n(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_bar(stat = "identity") +
+  xlab(NULL) +
+  coord_flip()
+
+
+
+
+stars3 = rev.topics %>% filter(stars == 3)
+bigrams = stars3 %>% 
+  unnest_tokens(word, review,token="ngrams",n=2) %>% count(word)
+bigrams = filter(bigrams,n < 400)
+wordcloud(bigrams$word,bigrams$n,min.freq = 200, scale=c(0.5,2.4), colors = brewer.pal(8,"Accent"))
+
+
+bigrams %>% top_n(10) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_bar(stat = "identity") +
+  xlab(NULL) +
+  coord_flip()
+```
+# Анализ настроения комментариев
+Кроме выявления отдельных тем, всплывающих в комментариях, можно оценивать их настроение.
+Здесь мы загружаем базу данных по обсуждениям косметических предметов
+Сначала небольшая обработка текста, чтобы мы нормально считали слова
+```{r}
+load("~/shared/minor2_2016/2-datatech/lab05-text-2/item_disc.rda")
+texts$text = str_replace_all(texts$text,fixed("\n")," ")
+texts$text = str_replace_all(texts$text,regex(" +")," ")
+texts$text = str_replace_all(texts$text,regex("http:[:graph:]*( |\\))"),"LINK")
+texts$text = gsub("([a-z])([A-Z])","\\1 \\2",texts$text)
+```
+
+На этом этапе мы превращаем комментариив в отдельные слова 
+```{r}
+words = texts %>%
+  unnest_tokens(word, text) 
+
+data(stop_words)
+
+words <- words %>%
+  anti_join(stop_words)
+```
+
+Базы с настроением -- Английский вариант. Это простые таблицы, которые объединяются с основным датасетом функцией inner_join. При желании можно сделать свою таблицу с настроениями.
+
+```{r}
+get_sentiments("afinn")
+get_sentiments("bing")
+get_sentiments("nrc")
+
+rm(sentiments)
+
+sent.per.item_bing = words %>% 
+  inner_join(get_sentiments("bing")) %>% 
+  group_by(name,sentiment) %>% count()
+
+sent.per.item_nrc = words %>% 
+  inner_join(get_sentiments("nrc")) %>% 
+  group_by(name,sentiment) %>% count()
+
+filter(sent.per.item_nrc,sentiment == "joy") %>% arrange(desc(n)) %>% head(1)
+
+sent.per.item_afinn = words %>% 
+  inner_join(get_sentiments("afinn")) %>% 
+  group_by(name) %>% 
+  summarise(sentiment = mean(score))
+
+sent.per.post = words %>% 
+  inner_join(get_sentiments("afinn")) %>% group_by(id) %>% 
+  summarise(sentiment = mean(score)) %>% inner_join(select(texts,id,text))
+```
+
+Какие предметы связаны с положительными отзывами? Какие предметы чаще ругают? Найдите примеры комментариев
+
+Составьте свой небольшой список настроений для отзывов. Сравните оценки по настроениям.

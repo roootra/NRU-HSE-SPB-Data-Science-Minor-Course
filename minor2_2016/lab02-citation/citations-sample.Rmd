@@ -1,0 +1,18 @@
+---
+title: "Data science and young froglings"
+bibliography: citation.bib
+---
+
+[Citation Reference](http://rmarkdown.rstudio.com/authoring_bibliographies_and_citations.html#citations)
+
+
+Mediabias is lame [@dyck2008corporate; @enikolopov2010media] 
+
+These guys [@becker2004lessons;@koltsova2006news] too. Vallone [-@vallone1985hostile p. 578] found out hostile media effect with hist experiment. 
+
+@vallone1985hostile [p. 578] found out hostile media effect with hist experiment.
+
+
+
+## References
+
